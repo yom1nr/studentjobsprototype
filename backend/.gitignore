@@ -1,0 +1,17 @@
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Go build output
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Vendor (if not using vendoring)
+# vendor/

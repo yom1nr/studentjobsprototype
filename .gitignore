@@ -1,0 +1,34 @@
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Go build artifacts
+backend/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# --- Personal repo: only ship README.md, backend/, frontend/ ---
+# Everything else at the project root (design-source folders like B67xxxxx,
+# course PDFs, the project/ notes folder, .claude/, etc.) is excluded.
+/*
+!/README.md
+!/backend/
+!/frontend/
+!/.gitignore

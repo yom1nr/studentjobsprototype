@@ -1,15 +1,10 @@
-import { useState } from 'react'
-import { Box, Button, Chip, Dialog, IconButton, InputAdornment, TextField, Typography } from '@mui/material'
+import { useEffect, useState } from 'react'
+import { Box, Button, Chip, Dialog, IconButton, TextField, Typography } from '@mui/material'
 import EventOutlinedIcon from '@mui/icons-material/EventOutlined'
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined'
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined'
-import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined'
-import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
-import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
-import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import AutorenewOutlinedIcon from '@mui/icons-material/AutorenewOutlined'
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined'
@@ -19,25 +14,27 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import DrawOutlinedIcon from '@mui/icons-material/DrawOutlined'
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import MailOutlineIcon from '@mui/icons-material/MailOutline'
+import { useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { ApiError } from '../../services/https'
+import { listEmployerApplications } from '../../services/https/applications'
+import {
+  confirmInterviewAttendance,
+  createInterview,
+  listMyInterviews,
+  requestReschedule,
+  sendInterviewResult,
+  updateInterview,
+} from '../../services/https/interviews'
+import type { Application } from '../../interface/IJobInterface'
+import type { InterviewScheduleRecord } from '../../interface/IInterviewInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6', ok: '#217829' }
 
-type Stage = 'awaiting_confirmation' | 'confirmed' | 'passed' | 'failed'
-type View = 'list' | 'appointment' | 'result'
-
-const interview = {
-  code: 'IV-2569-014',
-  position: 'Barista พาร์ทไทม์',
-  company: 'ร้าน Café Doi',
-  date: 'วันพฤหัสบดีที่ 24 ก.ค. 2569',
-  time: '13:30 - 14:00 น.',
-  format: 'สัมภาษณ์ ณ สถานที่',
-  interviewer: 'คุณสมชาย (ผู้จัดการร้าน)',
-  location: 'ร้าน Café Doi ชั้น 2 เลขที่ 99 ถ.มหาวิทยาลัย ต.สุรนารี อ.เมือง จ.นครราชสีมา',
-  contactPhone: '044-000-000',
-  preparation: ['บัตรประจำตัวนักศึกษา และบัตรประชาชน', 'สำเนาการลงเรียนภาคการศึกษาปัจจุบัน', 'มาถึงก่อนเวลานัด 10 นาที ที่จุดนัดพบ'],
+function apiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
 }
 
 function StepCard({
@@ -48,6 +45,7 @@ function StepCard({
   statusColor,
   statusBg,
   locked,
+  actionLabel,
   actionColor,
   onAction,
 }: Readonly<{
@@ -58,6 +56,7 @@ function StepCard({
   statusColor: string
   statusBg: string
   locked: boolean
+  actionLabel: string
   actionColor: string
   onAction: () => void
 }>) {
@@ -88,10 +87,7 @@ function StepCard({
         <Chip label={statusLabel} size="small" sx={{ bgcolor: statusBg, color: statusColor, fontWeight: 600 }} />
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5 }}>
-        <Typography sx={{ fontSize: 14, color: locked ? '#9AA0A6' : colors.navy }}>
-          {locked ? subtitle : `${interview.position} — ${interview.company}`}
-        </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5 }}>
         <Button
           disabled={locked}
           onClick={onAction}
@@ -99,291 +95,12 @@ function StepCard({
           size="small"
           sx={{ bgcolor: locked ? '#E0E0E0' : actionColor, color: locked ? '#9AA0A6' : '#fff', borderRadius: '20px', textTransform: 'none', px: 2 }}
         >
-          รายละเอียด
+          {actionLabel}
         </Button>
       </Box>
     </Box>
   )
 }
-
-function StudentInterviewsView() {
-  usePageTitle('ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์')
-
-  const [stage, setStage] = useState<Stage>('awaiting_confirmation')
-  const [view, setView] = useState<View>('list')
-
-  const [rescheduleOpen, setRescheduleOpen] = useState(false)
-  const [rescheduleRequested, setRescheduleRequested] = useState(false)
-  const [rescheduleDate, setRescheduleDate] = useState('')
-  const [rescheduleTime, setRescheduleTime] = useState('')
-  const [rescheduleReason, setRescheduleReason] = useState('')
-
-  function submitReschedule() {
-    setRescheduleRequested(true)
-    setRescheduleOpen(false)
-  }
-
-  if (view === 'appointment') {
-    return (
-      <Box sx={{ maxWidth: 950, mx: 'auto' }}>
-        <Button onClick={() => setView('list')} sx={{ textTransform: 'none', color: colors.navy, mb: 1, px: 0 }}>
-          ← กลับ
-        </Button>
-        <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>รายละเอียดนัดสัมภาษณ์</Typography>
-        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>ตรวจสอบรายละเอียดนัดหมาย และยืนยันการเข้ารับสัมภาษณ์</Typography>
-
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr' }, gap: 3, alignItems: 'start' }}>
-          <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-              <Chip label="รอการยืนยัน" size="small" sx={{ bgcolor: '#FFF0DD', color: '#B5850C', fontWeight: 600 }} />
-              <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>นัดหมายเลขที่ {interview.code}</Typography>
-            </Box>
-            <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>{interview.position}</Typography>
-            <Typography sx={{ fontSize: 14, color: '#697077', mb: 2 }}>{interview.company}</Typography>
-
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, borderTop: `1px solid ${colors.border}`, pt: 2, mb: 2 }}>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <EventOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
-                  <Typography sx={{ fontSize: 12, color: '#697077' }}>วันที่</Typography>
-                </Box>
-                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.date}</Typography>
-              </Box>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <AccessTimeOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
-                  <Typography sx={{ fontSize: 12, color: '#697077' }}>เวลา</Typography>
-                </Box>
-                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.time}</Typography>
-              </Box>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <PlaceOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
-                  <Typography sx={{ fontSize: 12, color: '#697077' }}>รูปแบบ</Typography>
-                </Box>
-                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.format}</Typography>
-              </Box>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <PersonOutlineOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
-                  <Typography sx={{ fontSize: 12, color: '#697077' }}>ผู้สัมภาษณ์</Typography>
-                </Box>
-                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.interviewer}</Typography>
-              </Box>
-            </Box>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-              <BusinessOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
-              <Typography sx={{ fontSize: 12, color: '#697077' }}>สถานที่</Typography>
-            </Box>
-            <Typography sx={{ fontSize: 14, mb: 2 }}>{interview.location}</Typography>
-
-            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>สิ่งที่ต้องเตรียม</Typography>
-            <Box component="ul" sx={{ m: 0, pl: 2.2, fontSize: 13, color: '#333' }}>
-              {interview.preparation.map((p) => <li key={p}>{p}</li>)}
-            </Box>
-          </Box>
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 1.5 }}>สถานที่นัดหมาย</Typography>
-              <Box sx={{ borderRadius: 2, overflow: 'hidden', height: 140 }}>
-                <Box
-                  component="iframe"
-                  title="แผนที่สถานที่นัดหมาย"
-                  src="https://maps.google.com/maps?q=14.8756,102.0246&z=16&output=embed"
-                  sx={{ width: '100%', height: '100%', border: 0 }}
-                  loading="lazy"
-                />
-              </Box>
-              <Typography sx={{ fontSize: 13, color: '#697077', mt: 1 }}>{interview.company} ชั้น 2 อาคารกิจกรรมนักศึกษา</Typography>
-            </Box>
-
-            <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 1 }}>ติดต่อผู้ประกอบการ</Typography>
-              <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.interviewer}</Typography>
-              <Typography sx={{ fontSize: 13, color: '#697077' }}>โทร {interview.contactPhone}</Typography>
-            </Box>
-
-            {rescheduleRequested ? (
-              <Chip
-                label="ส่งคำขอเลื่อนนัดแล้ว รอผู้ประกอบการตอบรับ"
-                sx={{ bgcolor: '#FFF0DD', color: '#B5850C', fontWeight: 600, height: 'auto', py: 1 }}
-              />
-            ) : (
-              <Button
-                variant="outlined"
-                onClick={() => setRescheduleOpen(true)}
-                sx={{ borderRadius: '40px', textTransform: 'none', color: colors.navy, borderColor: colors.border }}
-              >
-                ขอเลื่อน / เปลี่ยนนัด
-              </Button>
-            )}
-            <Button
-              variant="contained"
-              onClick={() => { setStage('confirmed'); setView('list') }}
-              sx={{ borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
-            >
-              ยืนยันเข้ารับสัมภาษณ์
-            </Button>
-          </Box>
-        </Box>
-
-        <Dialog open={rescheduleOpen} onClose={() => setRescheduleOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
-          <Box sx={{ p: 3.5 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>ขอเลื่อน / เปลี่ยนนัดสัมภาษณ์</Typography>
-              <IconButton size="small" onClick={() => setRescheduleOpen(false)}><CloseOutlinedIcon /></IconButton>
-            </Box>
-            <Typography sx={{ fontSize: 13, color: '#697077', mb: 2 }}>
-              นัดหมายเดิม: {interview.date} เวลา {interview.time}
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-              <TextField
-                label="วันที่สะดวก"
-                type="date"
-                value={rescheduleDate}
-                onChange={(e) => setRescheduleDate(e.target.value)}
-                fullWidth
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
-              <TextField
-                label="เวลาที่สะดวก"
-                type="time"
-                value={rescheduleTime}
-                onChange={(e) => setRescheduleTime(e.target.value)}
-                fullWidth
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
-            </Box>
-            <TextField
-              label="เหตุผล"
-              value={rescheduleReason}
-              onChange={(e) => setRescheduleReason(e.target.value)}
-              placeholder="ระบุเหตุผลที่ขอเลื่อนนัด"
-              fullWidth
-              multiline
-              minRows={3}
-              sx={{ mb: 3 }}
-            />
-            <Button
-              fullWidth
-              variant="contained"
-              disabled={!rescheduleDate || !rescheduleTime || rescheduleReason.trim().length === 0}
-              onClick={submitReschedule}
-              sx={{ height: 48, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
-            >
-              ส่งคำขอเลื่อนนัด
-            </Button>
-          </Box>
-        </Dialog>
-      </Box>
-    )
-  }
-
-  if (view === 'result') {
-    const passed = stage === 'passed'
-    return (
-      <Box sx={{ maxWidth: 700, mx: 'auto', textAlign: 'center', py: 6 }}>
-        {passed ? (
-          <CheckCircleOutlineIcon sx={{ fontSize: 120, color: colors.ok }} />
-        ) : (
-          <CancelOutlinedIcon sx={{ fontSize: 120, color: '#DA1E28' }} />
-        )}
-        <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mt: 2 }}>
-          {passed ? 'ยินดีด้วย คุณผ่านการสัมภาษณ์' : 'ขอบคุณที่เข้าร่วมสัมภาษณ์'}
-        </Typography>
-        <Typography sx={{ fontSize: 14, color: '#697077', mt: 1 }}>
-          ตำแหน่ง {interview.position}
-          <br />
-          {interview.company}
-        </Typography>
-        <Chip
-          label={passed ? 'ผ่านการสัมภาษณ์' : 'ไม่ผ่านการสัมภาษณ์'}
-          size="small"
-          sx={{ mt: 2, bgcolor: passed ? '#EAF7EA' : '#FDEAEA', color: passed ? colors.ok : '#DA1E28', fontWeight: 600 }}
-        />
-        <Typography sx={{ fontSize: 14, color: '#697077', mt: 3 }}>
-          {passed
-            ? 'กรุณารอสัญญาข้อตกลงการจ้างงานครับ ขอบคุณครับ สามารถติดตามได้ที่เมนู "แจ้งผลการจ้างงาน"'
-            : 'ขอบคุณสำหรับความสนใจ สามารถติดตามตำแหน่งงานอื่น ๆ ได้ที่เมนู "ค้นหางาน"'}
-        </Typography>
-        <Button onClick={() => setView('list')} sx={{ mt: 3, textTransform: 'none', color: colors.navy }}>← กลับ</Button>
-      </Box>
-    )
-  }
-
-  return (
-    <Box sx={{ maxWidth: 850, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <StepCard
-        step={1}
-        title="การนัดสัมภาษณ์"
-        subtitle="กำหนดนัด ยืนยัน เลื่อน"
-        statusLabel={stage === 'awaiting_confirmation' ? 'มีการนัดสัมภาษณ์' : 'สัมภาษณ์แล้ว'}
-        statusColor={stage === 'awaiting_confirmation' ? '#B5850C' : '#697077'}
-        statusBg={stage === 'awaiting_confirmation' ? '#FFF0DD' : '#F0F0F0'}
-        locked={false}
-        actionColor={colors.navy}
-        onAction={() => setView('appointment')}
-      />
-
-      <StepCard
-        step={2}
-        title="ผลการสัมภาษณ์"
-        subtitle="ผลการสัมภาษณ์"
-        statusLabel={stage === 'confirmed' ? 'มีผลการสัมภาษณ์' : stage === 'awaiting_confirmation' ? 'ล็อกอยู่' : 'ดูผล'}
-        statusColor={stage === 'confirmed' || stage === 'passed' || stage === 'failed' ? colors.ok : '#9AA0A6'}
-        statusBg={stage === 'confirmed' || stage === 'passed' || stage === 'failed' ? '#EAF7EA' : '#F0F0F0'}
-        locked={stage === 'awaiting_confirmation'}
-        actionColor="#0090FF"
-        onAction={() => { setStage('passed'); setView('result') }}
-      />
-    </Box>
-  )
-}
-
-// ─────────────────────────── Employer side ───────────────────────────
-// UI-only (local mock state, no service-layer calls) per B6733827's scope —
-// matches design source B6733827/*ฝั่งผู้ประกอบการ*.png exactly (see
-// t04_role_parity_audit memory). Backend models (InterviewSchedule,
-// RescheduleInterview) already exist; no controller/route work was done here.
-
-type ApplicantStage = 'new' | 'awaiting_confirm' | 'invited' | 'interviewed' | 'passed' | 'failed'
-
-type EmployerApplicant = {
-  id: number
-  initial: string
-  name: string
-  position: string
-  code: string
-}
-
-const employerApplicantStageChip: Record<ApplicantStage, { label: string; color: string; bg: string }> = {
-  new: { label: 'สมัครใหม่', color: '#697077', bg: '#F0F0F0' },
-  awaiting_confirm: { label: 'นัดแล้ว รอสัมภาษณ์', color: '#B5850C', bg: '#FFF0DD' },
-  invited: { label: 'นัดสัมภาษณ์ใหม่', color: '#697077', bg: '#F0F0F0' },
-  interviewed: { label: 'รอแจ้งผล', color: '#697077', bg: '#F0F0F0' },
-  passed: { label: 'ตอบรับเข้าทำงาน', color: colors.ok, bg: '#EAF7EA' },
-  failed: { label: 'ไม่ผ่านการสัมภาษณ์', color: '#DA1E28', bg: '#FDEAEA' },
-}
-
-const employerApplicants: EmployerApplicant[] = [
-  { id: 1, initial: 'ก', name: 'นายกฤษฎา ใจดี', position: 'Barista พาร์กไทม์', code: 'B65xxxxx' },
-  { id: 2, initial: 'ส', name: 'น.ส.สุดา รักเรียน', position: 'Barista พาร์กไทม์', code: 'B65yyyyy' },
-  { id: 3, initial: 'ม', name: 'นายมานะ อดทน', position: 'ผู้ช่วยสอน', code: 'B65aaaaa' },
-  { id: 4, initial: 'ธ', name: 'นายธนา มุ่งมั่น', position: 'Barista พาร์กไทม์', code: 'B65zzzzz' },
-  { id: 5, initial: 'ว', name: 'น.ส.วิภา ตั้งใจ', position: 'ผู้ช่วยสอน', code: 'B64bbbbb' },
-]
-
-const initialApplicantStages: Record<number, ApplicantStage> = {
-  1: 'new',
-  2: 'awaiting_confirm',
-  3: 'invited',
-  4: 'interviewed',
-  5: 'passed',
-}
-
-type EmployerSubview = 'picker' | 'hub' | 'schedule' | 'detail' | 'reschedule' | 'notifications' | 'results'
 
 function GmailConfirmDialog({
   open,
@@ -401,78 +118,419 @@ function GmailConfirmDialog({
           <br />
           <Box component="span" sx={{ color: colors.navy, fontWeight: 600 }}>{email}</Box>
           <br />
-          เรียบร้อยแล้วและทำการอัพเดตผลไปยังฝั่งนักศึกษาเรียบร้อย
+          เรียบร้อยแล้วและทำการอัพเดตผลไปยังอีกฝ่ายเรียบร้อย
         </Typography>
         <Box sx={{ bgcolor: '#FDEAEA', color: '#B3261E', fontSize: 13, borderRadius: 2, p: 1.5, mt: 2.5 }}>{note}</Box>
-        <Button onClick={onBack} sx={{ mt: 2.5, textTransform: 'none', color: colors.navy }}>← ผู้สมัครคนถัดไป</Button>
+        <Button onClick={onBack} sx={{ mt: 2.5, textTransform: 'none', color: colors.navy }}>← ตกลง</Button>
       </Box>
     </Dialog>
   )
 }
 
+// ─────────────────────────── Student side ───────────────────────────
+function StudentInterviewsView() {
+  usePageTitle('ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์')
+  const { token } = useAuth()
+  const navigate = useNavigate()
+
+  const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<'list' | 'appointment'>('list')
+
+  const [rescheduleOpen, setRescheduleOpen] = useState(false)
+  const [rescheduleDate, setRescheduleDate] = useState('')
+  const [rescheduleTime, setRescheduleTime] = useState('')
+  const [rescheduleReason, setRescheduleReason] = useState('')
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
+  const [rescheduleRequested, setRescheduleRequested] = useState(false)
+
+  const [confirming, setConfirming] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const data = await listMyInterviews(token!)
+        if (!cancelled) setInterviews(data)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลนัดสัมภาษณ์ไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [token])
+
+  const interview = interviews[0] ?? null
+
+  async function submitReschedule() {
+    if (!token || !interview) return
+    setRescheduleSubmitting(true)
+    try {
+      await requestReschedule(token, interview.id, {
+        reason: rescheduleReason,
+        student_available_date_time: rescheduleDate && rescheduleTime ? `${rescheduleDate}T${rescheduleTime}:00Z` : undefined,
+      })
+      setRescheduleRequested(true)
+      setRescheduleOpen(false)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ส่งคำขอเลื่อนนัดไม่สำเร็จ'))
+    } finally {
+      setRescheduleSubmitting(false)
+    }
+  }
+
+  async function confirmAttendance() {
+    if (!token || !interview) return
+    setConfirming(true)
+    try {
+      await confirmInterviewAttendance(token, interview.id)
+      setConfirmed(true)
+      setView('list')
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ยืนยันเข้ารับสัมภาษณ์ไม่สำเร็จ'))
+    } finally {
+      setConfirming(false)
+    }
+  }
+
+  if (loading) {
+    return <Box sx={{ maxWidth: 850, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
+  }
+
+  if (!interview) {
+    return (
+      <Box sx={{ maxWidth: 700, mx: 'auto', textAlign: 'center', py: 8 }}>
+        <ErrorAlert message={error} />
+        <EventOutlinedIcon sx={{ fontSize: 80, color: '#DDE1E6' }} />
+        <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy, mt: 2 }}>ยังไม่มีการนัดสัมภาษณ์</Typography>
+        <Typography sx={{ fontSize: 14, color: '#697077', mt: 1 }}>เมื่อผู้ประกอบการนัดสัมภาษณ์คุณ รายการจะแสดงที่นี่</Typography>
+      </Box>
+    )
+  }
+
+  if (view === 'appointment') {
+    return (
+      <Box sx={{ maxWidth: 950, mx: 'auto' }}>
+        <ErrorAlert message={error} />
+        <Button onClick={() => setView('list')} sx={{ textTransform: 'none', color: colors.navy, mb: 1, px: 0 }}>← กลับ</Button>
+        <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>รายละเอียดนัดสัมภาษณ์</Typography>
+        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>ตรวจสอบรายละเอียดนัดหมาย และยืนยันการเข้ารับสัมภาษณ์</Typography>
+
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr' }, gap: 3, alignItems: 'start' }}>
+          <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+              <Chip label={confirmed ? 'ยืนยันแล้ว' : 'รอการยืนยัน'} size="small" sx={{ bgcolor: confirmed ? '#EAF7EA' : '#FFF0DD', color: confirmed ? colors.ok : '#B5850C', fontWeight: 600 }} />
+              <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>นัดหมายเลขที่ IV-{String(interview.id).padStart(4, '0')}</Typography>
+            </Box>
+            <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>{interview.company_name}</Typography>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, borderTop: `1px solid ${colors.border}`, pt: 2, mb: 2, mt: 2 }}>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <EventOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>วันที่</Typography>
+                </Box>
+                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.appointment_date}</Typography>
+              </Box>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <AccessTimeOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>เวลา</Typography>
+                </Box>
+                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.appointment_time} น.</Typography>
+              </Box>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <PlaceOutlinedIcon fontSize="small" sx={{ color: '#697077' }} />
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>รูปแบบ</Typography>
+                </Box>
+                <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{interview.interview_format === 'onsite' ? 'สัมภาษณ์ ณ สถานที่' : 'สัมภาษณ์ออนไลน์'}</Typography>
+              </Box>
+            </Box>
+
+            <Typography sx={{ fontSize: 12, color: '#697077' }}>สถานที่ / ลิงก์</Typography>
+            <Typography sx={{ fontSize: 14, mb: 2 }}>{interview.location || '-'}</Typography>
+
+            {interview.preparation_details && (
+              <>
+                <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>สิ่งที่ต้องเตรียม</Typography>
+                <Typography sx={{ fontSize: 13, color: '#333' }}>{interview.preparation_details}</Typography>
+              </>
+            )}
+          </Box>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {rescheduleRequested ? (
+              <Chip label="ส่งคำขอเลื่อนนัดแล้ว รอผู้ประกอบการตอบรับ" sx={{ bgcolor: '#FFF0DD', color: '#B5850C', fontWeight: 600, height: 'auto', py: 1 }} />
+            ) : (
+              <Button variant="outlined" onClick={() => setRescheduleOpen(true)} sx={{ borderRadius: '40px', textTransform: 'none', color: colors.navy, borderColor: colors.border }}>
+                ขอเลื่อน / เปลี่ยนนัด
+              </Button>
+            )}
+            <Button
+              variant="contained"
+              disabled={confirmed || confirming}
+              onClick={confirmAttendance}
+              sx={{ borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
+            >
+              {confirmed ? 'ยืนยันแล้ว' : confirming ? 'กำลังยืนยัน...' : 'ยืนยันเข้ารับสัมภาษณ์'}
+            </Button>
+          </Box>
+        </Box>
+
+        <Dialog open={rescheduleOpen} onClose={() => setRescheduleOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+          <Box sx={{ p: 3.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>ขอเลื่อน / เปลี่ยนนัดสัมภาษณ์</Typography>
+              <IconButton size="small" onClick={() => setRescheduleOpen(false)}><CloseOutlinedIcon /></IconButton>
+            </Box>
+            <Typography sx={{ fontSize: 13, color: '#697077', mb: 2 }}>
+              นัดหมายเดิม: {interview.appointment_date} เวลา {interview.appointment_time} น.
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+              <TextField label="วันที่สะดวก" type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} />
+              <TextField label="เวลาที่สะดวก" type="time" value={rescheduleTime} onChange={(e) => setRescheduleTime(e.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} />
+            </Box>
+            <TextField
+              label="เหตุผล"
+              value={rescheduleReason}
+              onChange={(e) => setRescheduleReason(e.target.value)}
+              placeholder="ระบุเหตุผลที่ขอเลื่อนนัด"
+              fullWidth
+              multiline
+              minRows={3}
+              sx={{ mb: 3 }}
+            />
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={!rescheduleDate || !rescheduleTime || rescheduleReason.trim().length === 0 || rescheduleSubmitting}
+              onClick={submitReschedule}
+              sx={{ height: 48, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
+            >
+              {rescheduleSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอเลื่อนนัด'}
+            </Button>
+          </Box>
+        </Dialog>
+      </Box>
+    )
+  }
+
+  return (
+    <Box sx={{ maxWidth: 850, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      <ErrorAlert message={error} />
+      <StepCard
+        step={1}
+        title="การนัดสัมภาษณ์"
+        subtitle={`${interview.company_name} • ${interview.appointment_date} ${interview.appointment_time} น.`}
+        statusLabel={confirmed ? 'ยืนยันแล้ว' : 'มีการนัดสัมภาษณ์'}
+        statusColor={confirmed ? colors.ok : '#B5850C'}
+        statusBg={confirmed ? '#EAF7EA' : '#FFF0DD'}
+        locked={false}
+        actionLabel="รายละเอียด"
+        actionColor={colors.navy}
+        onAction={() => setView('appointment')}
+      />
+
+      <StepCard
+        step={2}
+        title="ผลการสัมภาษณ์"
+        subtitle="ผลการพิจารณาจะส่งผ่านการแจ้งเตือน"
+        statusLabel="ดูที่การแจ้งเตือน"
+        statusColor="#0090FF"
+        statusBg="#EFF6FF"
+        locked={false}
+        actionLabel="ไปที่การแจ้งเตือน"
+        actionColor="#0090FF"
+        onAction={() => navigate('/notifications')}
+      />
+    </Box>
+  )
+}
+
+// ─────────────────────────── Employer side ───────────────────────────
+// Wired to the real backend (B6733827): candidates come from the employer's
+// accepted applications (existing /employer/applications endpoint); scheduling,
+// reschedule requests, and interview-result notifications go through the new
+// interview endpoints. There's no persisted "confirmed"/"interviewed"/"passed"
+// field on InterviewSchedule (not in the class diagram — see
+// interview_dto.go's InterviewResultRequest comment), so those states are
+// derived loosely (has-interview / has-agreement) rather than tracked exactly.
+
+type EmployerSubview = 'picker' | 'hub' | 'schedule' | 'detail' | 'reschedule' | 'results'
+
 function EmployerInterviewsView() {
   usePageTitle('จัดการนัดหมายสัมภาษณ์')
+  const { token } = useAuth()
+  const navigate = useNavigate()
 
-  const [stages, setStages] = useState(initialApplicantStages)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [applications, setApplications] = useState<Application[]>([])
+  const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null)
   const [subview, setSubview] = useState<EmployerSubview>('picker')
 
-  const [scheduleDate, setScheduleDate] = useState('2569-07-24')
-  const [scheduleTime, setScheduleTime] = useState('13:30')
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleTime, setScheduleTime] = useState('')
   const [scheduleFormat, setScheduleFormat] = useState<'onsite' | 'online'>('onsite')
-  const [scheduleLocation, setScheduleLocation] = useState('ร้าน Café Doi ชั้น 2')
+  const [scheduleLocation, setScheduleLocation] = useState('')
   const [schedulePrep, setSchedulePrep] = useState('')
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false)
 
   const [rescheduleNote, setRescheduleNote] = useState('')
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
   const [rescheduleConfirmOpen, setRescheduleConfirmOpen] = useState(false)
 
+  const [resultComment, setResultComment] = useState('')
+  const [resultSubmitting, setResultSubmitting] = useState(false)
   const [resultsConfirmOpen, setResultsConfirmOpen] = useState(false)
-  const [notifTab, setNotifTab] = useState<'all' | 'unread' | 'reschedule'>('all')
 
-  const notScheduled = employerApplicants.filter((a) => stages[a.id] === 'new' || stages[a.id] === 'awaiting_confirm' || stages[a.id] === 'invited')
-  const interviewed = employerApplicants.filter((a) => stages[a.id] === 'interviewed' || stages[a.id] === 'passed' || stages[a.id] === 'failed')
+  async function load() {
+    if (!token) return
+    setLoading(true)
+    try {
+      const [apps, ivs] = await Promise.all([listEmployerApplications(token), listMyInterviews(token)])
+      setApplications(apps.filter((a) => a.status === 'accepted'))
+      setInterviews(ivs)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'โหลดข้อมูลผู้สมัครไม่สำเร็จ'))
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  const selected = employerApplicants.find((a) => a.id === selectedId) ?? null
-  const selectedStage = selectedId ? stages[selectedId] : null
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function doLoad() {
+      setLoading(true)
+      try {
+        const [apps, ivs] = await Promise.all([listEmployerApplications(token!), listMyInterviews(token!)])
+        if (cancelled) return
+        setApplications(apps.filter((a) => a.status === 'accepted'))
+        setInterviews(ivs)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลผู้สมัครไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void doLoad()
+    return () => { cancelled = true }
+  }, [token])
 
-  function pick(id: number) {
-    setSelectedId(id)
+  function interviewFor(studentId: number): InterviewScheduleRecord | null {
+    return interviews.find((iv) => iv.student_id === studentId) ?? null
+  }
+
+  const notScheduled = applications.filter((a) => !interviewFor(a.student_id))
+  const scheduled = applications.filter((a) => interviewFor(a.student_id))
+
+  const selectedApplication = applications.find((a) => a.student_id === selectedStudentId) ?? null
+  const selectedInterview = selectedStudentId ? interviewFor(selectedStudentId) : null
+
+  function pick(studentId: number) {
+    setSelectedStudentId(studentId)
     setSubview('hub')
   }
 
-  function submitSchedule() {
-    if (selectedId) setStages((prev) => ({ ...prev, [selectedId]: 'awaiting_confirm' }))
-    setSubview('hub')
+  async function submitSchedule() {
+    if (!token || !selectedStudentId) return
+    setScheduleSubmitting(true)
+    try {
+      const payload = {
+        interview_format: scheduleFormat,
+        appointment_date: scheduleDate,
+        appointment_time: scheduleTime,
+        location: scheduleLocation,
+        preparation_details: schedulePrep,
+      }
+      if (selectedInterview) {
+        await updateInterview(token, selectedInterview.id, payload)
+      } else {
+        await createInterview(token, { student_id: selectedStudentId, ...payload })
+      }
+      await load()
+      setSubview('hub')
+    } catch (err) {
+      setError(apiErrorMessage(err, 'บันทึกนัดหมายไม่สำเร็จ'))
+    } finally {
+      setScheduleSubmitting(false)
+    }
   }
 
-  function markInterviewed() {
-    if (selectedId) setStages((prev) => ({ ...prev, [selectedId]: 'interviewed' }))
-    setSubview('hub')
+  function openSchedule() {
+    if (selectedInterview) {
+      setScheduleDate(selectedInterview.appointment_date)
+      setScheduleTime(selectedInterview.appointment_time)
+      setScheduleFormat(selectedInterview.interview_format)
+      setScheduleLocation(selectedInterview.location)
+      setSchedulePrep(selectedInterview.preparation_details)
+    } else {
+      setScheduleDate('')
+      setScheduleTime('')
+      setScheduleFormat('onsite')
+      setScheduleLocation('')
+      setSchedulePrep('')
+    }
+    setSubview('schedule')
   }
 
-  function setResult(id: number, stage: ApplicantStage) {
-    setStages((prev) => ({ ...prev, [id]: stage }))
+  async function submitReschedule() {
+    if (!token || !selectedInterview) return
+    setRescheduleSubmitting(true)
+    try {
+      await requestReschedule(token, selectedInterview.id, { reason: rescheduleNote })
+      setRescheduleConfirmOpen(true)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ส่งคำขอเปลี่ยนกำหนดการไม่สำเร็จ'))
+    } finally {
+      setRescheduleSubmitting(false)
+    }
   }
 
-  const HubHeader = selected && (
+  async function submitResult(result: 'passed' | 'failed') {
+    if (!token || !selectedInterview) return
+    setResultSubmitting(true)
+    try {
+      await sendInterviewResult(token, selectedInterview.id, { result, comment: resultComment })
+      setResultsConfirmOpen(true)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ส่งผลการสัมภาษณ์ไม่สำเร็จ'))
+    } finally {
+      setResultSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return <Box sx={{ maxWidth: 1100, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
+  }
+
+  const HubHeader = selectedApplication && (
     <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, flexWrap: 'wrap', gap: 1.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Box sx={{ width: 44, height: 44, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
-          {selected.initial}
+          {selectedApplication.student_name.charAt(0)}
         </Box>
         <Box>
-          <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{selected.name}</Typography>
-          <Typography sx={{ fontSize: 12, color: '#697077' }}>{selected.position} • รหัส {selected.code}</Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{selectedApplication.student_name}</Typography>
+          <Typography sx={{ fontSize: 12, color: '#697077' }}>{selectedApplication.position}</Typography>
         </Box>
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        {selectedStage && (
-          <Chip
-            label={`ขั้นปัจจุบัน: ${employerApplicantStageChip[selectedStage].label}`}
-            size="small"
-            sx={{ bgcolor: employerApplicantStageChip[selectedStage].bg, color: employerApplicantStageChip[selectedStage].color, fontWeight: 600 }}
-          />
-        )}
+        <Chip
+          label={selectedInterview ? 'มีนัดสัมภาษณ์แล้ว' : 'ยังไม่มีนัดสัมภาษณ์'}
+          size="small"
+          sx={{ bgcolor: selectedInterview ? '#EAF7EA' : '#F0F0F0', color: selectedInterview ? colors.ok : '#697077', fontWeight: 600 }}
+        />
         <Button onClick={() => setSubview('picker')} size="small" sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy, px: 2 }}>
           ← เปลี่ยนผู้สมัคร
         </Button>
@@ -480,68 +538,62 @@ function EmployerInterviewsView() {
     </Box>
   )
 
-  if (subview === 'picker') {
+  if (subview === 'picker' || !selectedApplication) {
     return (
       <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+        <ErrorAlert message={error} />
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>เลือกผู้สมัคร</Typography>
         <Typography sx={{ fontSize: 14, color: '#697077', mb: 2 }}>
           เลือกผู้สมัคร 1 คนก่อน — ระบบนัดสัมภาษณ์ และระบบตกลงการจ้างงานจะเปิดใช้งานหลังเลือก
         </Typography>
         <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, mb: 3 }}>
-          👋 ผู้ประกอบการเป็นผู้กดเลือกผู้สมัครเอง จากนั้นจึงเริ่มกระบวนการนัดสัมภาษณ์ / จ้างงาน
+          👋 รายชื่อด้านล่างมาจากใบสมัครที่คุณตอบรับแล้ว (ตรวจสอบใบสมัครได้ที่เมนู &quot;ผู้สมัครงาน&quot;)
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🟠 ยังไม่สัมภาษณ์ <Chip label={`${notScheduled.length} คน`} size="small" sx={{ ml: 0.5 }} /></Typography>
-            <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>รวมผู้สมัครใหม่ และผู้ที่นัดแล้วแต่ยังไม่ได้สัมภาษณ์</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🟠 ยังไม่นัดสัมภาษณ์ <Chip label={`${notScheduled.length} คน`} size="small" sx={{ ml: 0.5 }} /></Typography>
+            <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>ผ่านการคัดเลือกใบสมัครแล้ว รอนัดสัมภาษณ์</Typography>
             {notScheduled.map((a) => (
-              <Box key={a.id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
+              <Box key={a.student_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>{a.initial}</Box>
+                  <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>{a.student_name.charAt(0)}</Box>
                   <Box>
-                    <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{a.name}</Typography>
-                    <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{a.position} • {a.code}</Typography>
+                    <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{a.student_name}</Typography>
+                    <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{a.position}</Typography>
                   </Box>
                 </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Chip label={employerApplicantStageChip[stages[a.id]].label} size="small" sx={{ bgcolor: employerApplicantStageChip[stages[a.id]].bg, color: employerApplicantStageChip[stages[a.id]].color, fontWeight: 600 }} />
-                  <Button onClick={() => pick(a.id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
-                </Box>
+                <Button onClick={() => pick(a.student_id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
               </Box>
             ))}
+            {notScheduled.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 2 }}>ไม่มีรายการ</Typography>}
           </Box>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🔵 สัมภาษณ์แล้ว <Chip label={`${interviewed.length} คน`} size="small" sx={{ ml: 0.5 }} /></Typography>
-            <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>ผ่านการสัมภาษณ์ — พร้อมแจ้งผลและจัดทำข้อตกลงการจ้างงาน</Typography>
-            {interviewed.map((a) => (
-              <Box key={a.id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🔵 นัดสัมภาษณ์แล้ว <Chip label={`${scheduled.length} คน`} size="small" sx={{ ml: 0.5 }} /></Typography>
+            <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>มีนัดสัมภาษณ์แล้ว — พร้อมแจ้งผลและจัดทำข้อตกลงการจ้างงาน</Typography>
+            {scheduled.map((a) => (
+              <Box key={a.student_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>{a.initial}</Box>
+                  <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>{a.student_name.charAt(0)}</Box>
                   <Box>
-                    <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{a.name}</Typography>
-                    <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{a.position} • {a.code}</Typography>
+                    <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{a.student_name}</Typography>
+                    <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{a.position}</Typography>
                   </Box>
                 </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Chip label={employerApplicantStageChip[stages[a.id]].label} size="small" sx={{ bgcolor: employerApplicantStageChip[stages[a.id]].bg, color: employerApplicantStageChip[stages[a.id]].color, fontWeight: 600 }} />
-                  <Button onClick={() => pick(a.id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
-                </Box>
+                <Button onClick={() => pick(a.student_id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
               </Box>
             ))}
+            {scheduled.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 2 }}>ไม่มีรายการ</Typography>}
           </Box>
         </Box>
       </Box>
     )
   }
 
-  if (!selected || !selectedStage) {
-    return null
-  }
-
   if (subview === 'hub') {
-    const unlocked = selectedStage === 'passed'
+    const unlocked = !!selectedInterview
     return (
       <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+        <ErrorAlert message={error} />
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>พื้นที่จัดการผู้สมัคร</Typography>
         <Typography sx={{ fontSize: 14, color: '#697077', mb: 2.5 }}>
           เลือกกระบวนการที่ต้องการดำเนินการ — ระบบจัดการนัดหมายสัมภาษณ์ และระบบตกลงการจ้างงาน
@@ -560,18 +612,18 @@ function EmployerInterviewsView() {
               <Chip label="พร้อมใช้งาน" size="small" sx={{ bgcolor: '#EAF7EA', color: colors.ok, fontWeight: 600 }} />
             </Box>
             {[
-              { icon: <EventOutlinedIcon fontSize="small" />, label: 'กำหนดนัดหมายสัมภาษณ์', action: () => setSubview('schedule') },
-              { icon: <VisibilityOutlinedIcon fontSize="small" />, label: 'รายละเอียด / ยืนยันนัด', action: () => setSubview('detail') },
-              { icon: <AutorenewOutlinedIcon fontSize="small" />, label: 'ขอเปลี่ยน / เลื่อนกำหนดการ', action: () => setSubview('reschedule') },
-              { icon: <NotificationsNoneOutlinedIcon fontSize="small" />, label: 'การแจ้งเตือน', action: () => setSubview('notifications') },
-              { icon: <CampaignOutlinedIcon fontSize="small" />, label: 'แจ้งผลการพิจารณาการสัมภาษณ์', action: () => setSubview('results') },
+              { icon: <EventOutlinedIcon fontSize="small" />, label: selectedInterview ? 'แก้ไขนัดหมายสัมภาษณ์' : 'กำหนดนัดหมายสัมภาษณ์', action: openSchedule },
+              { icon: <VisibilityOutlinedIcon fontSize="small" />, label: 'รายละเอียดนัดหมาย', action: () => setSubview('detail'), disabled: !selectedInterview },
+              { icon: <AutorenewOutlinedIcon fontSize="small" />, label: 'ขอเปลี่ยน / เลื่อนกำหนดการ', action: () => setSubview('reschedule'), disabled: !selectedInterview },
+              { icon: <NotificationsNoneOutlinedIcon fontSize="small" />, label: 'การแจ้งเตือน', action: () => navigate('/notifications') },
+              { icon: <CampaignOutlinedIcon fontSize="small" />, label: 'แจ้งผลการพิจารณาการสัมภาษณ์', action: () => setSubview('results'), disabled: !selectedInterview },
             ].map((row) => (
-              <Box key={row.label} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5, mb: 1.25 }}>
+              <Box key={row.label} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5, mb: 1.25, opacity: row.disabled ? 0.5 : 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, color: colors.navy }}>
                   {row.icon}
                   <Typography sx={{ fontSize: 14 }}>{row.label}</Typography>
                 </Box>
-                <Button onClick={row.action} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>ทำรายการ</Button>
+                <Button disabled={row.disabled} onClick={row.action} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>ทำรายการ</Button>
               </Box>
             ))}
           </Box>
@@ -595,12 +647,12 @@ function EmployerInterviewsView() {
 
             {!unlocked && (
               <Box sx={{ bgcolor: '#FDEAEA', color: '#B3261E', fontSize: 13, borderRadius: 2, p: 1.5, mb: 1.5 }}>
-                * ต้องผ่านการสัมภาษณ์ และได้ผล &quot;ตอบรับเข้าทำงาน&quot; ก่อน จึงจะเปิดใช้งานได้
+                * ต้องนัดสัมภาษณ์ผู้สมัครก่อน จึงจะเปิดใช้งานได้
               </Box>
             )}
             {unlocked && (
               <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, mb: 1.5 }}>
-                ปลดล็อกแล้วเพราะผู้สมัครผ่านการสัมภาษณ์แล้ว — ระบบพร้อมจัดทำข้อตกลงการจ้างงาน
+                พร้อมจัดทำข้อตกลงการจ้างงานให้ผู้สมัครคนนี้แล้ว
               </Box>
             )}
 
@@ -621,7 +673,7 @@ function EmployerInterviewsView() {
               <Button
                 fullWidth
                 variant="contained"
-                onClick={() => window.location.assign('/employment')}
+                onClick={() => navigate('/employment')}
                 sx={{ mt: 0.5, borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
               >
                 ไปที่ระบบตกลงการจ้างงาน →
@@ -640,6 +692,7 @@ function EmployerInterviewsView() {
   if (subview === 'schedule') {
     return (
       <Box sx={{ maxWidth: 950, mx: 'auto' }}>
+        <ErrorAlert message={error} />
         {BackToHub}
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>กำหนดนัดหมายสัมภาษณ์</Typography>
         <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>กำหนดวัน เวลา และสถานที่นัดสัมภาษณ์ให้ผู้สมัครที่ผ่านการคัดเลือกเบื้องต้น</Typography>
@@ -647,7 +700,7 @@ function EmployerInterviewsView() {
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
             <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>ข้อมูลนัดสัมภาษณ์</Typography>
             <Typography sx={{ fontSize: 13, color: '#697077', mb: 0.5 }}>ผู้สมัคร</Typography>
-            <TextField value={`${selected.name} — ${selected.position}`} fullWidth disabled sx={{ mb: 2 }} />
+            <TextField value={`${selectedApplication.student_name} — ${selectedApplication.position}`} fullWidth disabled sx={{ mb: 2 }} />
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <TextField label="วันที่นัด" type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} />
               <TextField label="เวลา" type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} />
@@ -663,14 +716,22 @@ function EmployerInterviewsView() {
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
             <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>สรุปนัดหมาย</Typography>
             <Typography sx={{ fontSize: 12, color: '#697077' }}>วัน-เวลา</Typography>
-            <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1.5 }}>24 ก.ค. 2569 • {scheduleTime} น.</Typography>
+            <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1.5 }}>{scheduleDate || '-'} • {scheduleTime || '-'} น.</Typography>
             <Typography sx={{ fontSize: 12, color: '#697077' }}>รูปแบบ</Typography>
             <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1.5 }}>{scheduleFormat === 'onsite' ? 'สัมภาษณ์ ณ สถานที่' : 'สัมภาษณ์ออนไลน์'}</Typography>
             <Typography sx={{ fontSize: 12, color: '#697077' }}>สถานที่</Typography>
             <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 2 }}>{scheduleLocation || '-'}</Typography>
             <Box sx={{ display: 'flex', gap: 1.5 }}>
               <Button onClick={() => setSubview('hub')} sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy, px: 2.5 }}>ยกเลิก</Button>
-              <Button fullWidth variant="contained" onClick={submitSchedule} sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}>บันทึกและส่งการแจ้งเตือน</Button>
+              <Button
+                fullWidth
+                variant="contained"
+                disabled={!scheduleDate || !scheduleTime || scheduleSubmitting}
+                onClick={submitSchedule}
+                sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
+              >
+                {scheduleSubmitting ? 'กำลังบันทึก...' : 'บันทึกและส่งการแจ้งเตือน'}
+              </Button>
             </Box>
           </Box>
         </Box>
@@ -678,219 +739,128 @@ function EmployerInterviewsView() {
     )
   }
 
-  if (subview === 'detail') {
+  if (subview === 'detail' && selectedInterview) {
     return (
       <Box sx={{ maxWidth: 700, mx: 'auto' }}>
         {BackToHub}
-        <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>รายละเอียด / ยืนยันนัด</Typography>
-        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>ตรวจสอบรายละเอียดนัดหมายที่บันทึกไว้กับผู้สมัคร</Typography>
+        <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>รายละเอียดนัดหมาย</Typography>
+        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>รายละเอียดนัดหมายที่บันทึกไว้กับผู้สมัคร</Typography>
         <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
-            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>วันที่</Typography><Typography sx={{ fontWeight: 600 }}>24 ก.ค. 2569</Typography></Box>
-            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>เวลา</Typography><Typography sx={{ fontWeight: 600 }}>{scheduleTime} น.</Typography></Box>
-            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>รูปแบบ</Typography><Typography sx={{ fontWeight: 600 }}>{scheduleFormat === 'onsite' ? 'สัมภาษณ์ ณ สถานที่' : 'สัมภาษณ์ออนไลน์'}</Typography></Box>
-            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>สถานที่</Typography><Typography sx={{ fontWeight: 600 }}>{scheduleLocation || '-'}</Typography></Box>
+            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>วันที่</Typography><Typography sx={{ fontWeight: 600 }}>{selectedInterview.appointment_date}</Typography></Box>
+            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>เวลา</Typography><Typography sx={{ fontWeight: 600 }}>{selectedInterview.appointment_time} น.</Typography></Box>
+            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>รูปแบบ</Typography><Typography sx={{ fontWeight: 600 }}>{selectedInterview.interview_format === 'onsite' ? 'สัมภาษณ์ ณ สถานที่' : 'สัมภาษณ์ออนไลน์'}</Typography></Box>
+            <Box><Typography sx={{ fontSize: 12, color: '#697077' }}>สถานที่</Typography><Typography sx={{ fontWeight: 600 }}>{selectedInterview.location || '-'}</Typography></Box>
           </Box>
           <Button
             fullWidth
             variant="contained"
-            disabled={selectedStage !== 'awaiting_confirm' && selectedStage !== 'invited'}
-            onClick={markInterviewed}
+            onClick={() => setSubview('results')}
             sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: colors.ok, '&:hover': { bgcolor: '#1B5F21' } }}
           >
-            ทำเครื่องหมายว่าสัมภาษณ์เสร็จสิ้นแล้ว
+            ไปแจ้งผลการสัมภาษณ์
           </Button>
         </Box>
       </Box>
     )
   }
 
-  if (subview === 'reschedule') {
+  if (subview === 'reschedule' && selectedInterview) {
     return (
       <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
         {BackToHub}
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>ขอเปลี่ยน / เลื่อนกำหนดการ</Typography>
         <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>เสนอกำหนดการสอบถามสำหรับนัดหมายที่ยืนยันแล้ว ระบบจะบันทึกประวัติทุกครั้ง</Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr' }, gap: 3, alignItems: 'start' }}>
-          <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>เสนอการขอเปลี่ยน / เลื่อนวันเวลา</Typography>
-            <Typography sx={{ fontSize: 13, color: '#697077', mb: 0.5 }}>เลือกนัดหมายที่ต้องการเปลี่ยน</Typography>
-            <TextField value={`IV-2569-014 • ${selected.position} • 24 ก.ค. ${scheduleTime}`} fullWidth disabled sx={{ mb: 2 }} />
-            <TextField
-              label="ทำการสอบถามจากนักศึกษาวันที่ว่าง"
-              value={rescheduleNote}
-              onChange={(e) => setRescheduleNote(e.target.value)}
-              placeholder="บอกรายละเอียดสอบถามนักศึกษาวันที่ว่างตามรายเอียดตามที่ต้องการจะรู้ ระบบจะส่งการตอบรับวันใหม่ของนักศึกษากลับมา"
-              fullWidth
-              multiline
-              minRows={4}
-              sx={{ mb: 2 }}
-            />
-            <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5 }}>
-              เมื่อส่งคำขอ ระบบจะแจ้งอีกฝ่ายให้ตรวจสอบและยืนยันรับทราบกำหนดการใหม่
-            </Box>
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3, maxWidth: 600 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>เสนอการขอเปลี่ยน / เลื่อนวันเวลา</Typography>
+          <Typography sx={{ fontSize: 13, color: '#697077', mb: 0.5 }}>นัดหมายที่ต้องการเปลี่ยน</Typography>
+          <TextField value={`IV-${String(selectedInterview.id).padStart(4, '0')} • ${selectedApplication.position} • ${selectedInterview.appointment_date} ${selectedInterview.appointment_time}`} fullWidth disabled sx={{ mb: 2 }} />
+          <TextField
+            label="ทำการสอบถามจากนักศึกษาวันที่ว่าง"
+            value={rescheduleNote}
+            onChange={(e) => setRescheduleNote(e.target.value)}
+            placeholder="บอกรายละเอียดสอบถามนักศึกษาวันที่ว่างตามรายละเอียดตามที่ต้องการจะรู้"
+            fullWidth
+            multiline
+            minRows={4}
+            sx={{ mb: 2 }}
+          />
+          <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, mb: 2 }}>
+            เมื่อส่งคำขอ ระบบจะแจ้งอีกฝ่ายให้ตรวจสอบและยืนยันรับทราบกำหนดการใหม่
           </Box>
-          <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>ประวัติการเปลี่ยนแปลงการสัมภาษณ์</Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ borderLeft: `2px solid ${colors.navy}`, pl: 1.5 }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 13, color: colors.navy }}>สร้างนัดหมาย</Typography>
-                <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>โดยผู้ประกอบการ • 19 ก.ค. 11:20</Typography>
-              </Box>
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1.5, mt: 3 }}>
-              <Button onClick={() => setSubview('hub')} sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy, px: 2.5 }}>ยกเลิก</Button>
-              <Button
-                fullWidth
-                variant="contained"
-                disabled={rescheduleNote.trim().length === 0}
-                onClick={() => setRescheduleConfirmOpen(true)}
-                sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
-              >
-                ส่งคำขอเปลี่ยนกำหนดการ
-              </Button>
-            </Box>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Button onClick={() => setSubview('hub')} sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy, px: 2.5 }}>ยกเลิก</Button>
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={rescheduleNote.trim().length === 0 || rescheduleSubmitting}
+              onClick={submitReschedule}
+              sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
+            >
+              {rescheduleSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอเปลี่ยนกำหนดการ'}
+            </Button>
           </Box>
         </Box>
         <GmailConfirmDialog
           open={rescheduleConfirmOpen}
           onClose={() => setRescheduleConfirmOpen(false)}
-          email="job-student@gmail.com"
+          email="student@gmail.com"
           note="กรุณารอการแจ้งเตือนวันนัดหมายใหม่จากนักศึกษาด้วยครับในการแจ้งเตือนนะครับ"
-          onBack={() => { setRescheduleConfirmOpen(false); setSubview('hub') }}
+          onBack={() => { setRescheduleConfirmOpen(false); setRescheduleNote(''); setSubview('hub') }}
         />
       </Box>
     )
   }
 
-  if (subview === 'notifications') {
-    const items = [
-      { icon: <AutorenewOutlinedIcon fontSize="small" />, title: `ส่งคำขอเลื่อนนัดจากผู้ประกอบการ — ${selected.name}`, body: `นักศึกษาขอเลื่อนนัด IV-2569-014 (${selected.position}) และเสนอวันที่สะดวกมา 3 วัน ให้เลือกแล้ว`, time: '5 นาทีที่แล้ว', reschedule: true, unread: true },
-      { icon: <AutorenewOutlinedIcon fontSize="small" />, title: 'คำขอเลื่อนนัดจากนักศึกษา — น.ส.สุดา รักเรียน', body: 'นักศึกษาขอเลื่อนนัด IV-2569-014 (Barista พาร์กไทม์) เสนอวันที่สะดวกมาแล้ว 1 วัน', time: '5 นาทีที่แล้ว', reschedule: true, unread: true },
-      { icon: <PersonOutlineOutlinedIcon fontSize="small" />, title: 'มีผู้สมัครใหม่ — ตำแหน่ง Barista พาร์กไทม์', body: 'นายมานะ อดทน สมัครเข้ามาใหม่ รอการคัดกรอง', time: '1 ชม.ที่แล้ว', reschedule: false, unread: false },
-      { icon: <CheckCircleOutlineIcon fontSize="small" />, title: 'นักศึกษายืนยันเข้ารับสัมภาษณ์', body: 'นายธนา มุ่งมั่น ยืนยันนัดสัมภาษณ์ IV-2569-011 แล้ว', time: 'เมื่อวาน', reschedule: false, unread: false },
-      { icon: <DescriptionOutlinedIcon fontSize="small" />, title: 'นักศึกษาตอบรับข้อตกลงการจ้างงาน', body: 'ข้อตกลง AG-2569-021 เปลี่ยนสถานะเป็น "มีผลบังคับ"', time: '2 วันที่แล้ว', reschedule: false, unread: false },
-    ]
-    const visible = items.filter((it) => notifTab === 'all' || (notifTab === 'unread' && it.unread) || (notifTab === 'reschedule' && it.reschedule))
+  if (subview === 'results' && selectedInterview) {
     return (
-      <Box sx={{ maxWidth: 950, mx: 'auto' }}>
+      <Box sx={{ maxWidth: 700, mx: 'auto' }}>
         {BackToHub}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 1.5 }}>
-          <Box>
-            <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>การแจ้งเตือน</Typography>
-            <Typography sx={{ fontSize: 14, color: '#697077', mb: 2 }}>คำขอและอัปเดตจากนักศึกษา — กดเข้าไปดูรายละเอียดเพื่อดำเนินการ</Typography>
-          </Box>
-          <Button sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy }}>ทำเครื่องหมายว่าอ่านทั้งหมด</Button>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, mb: 2.5 }}>
-          {(['all', 'unread', 'reschedule'] as const).map((t) => (
+        <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 28, color: colors.navy }}>แจ้งผลการพิจารณาผ่านการสัมภาษณ์</Typography>
+        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>บันทึกและแจ้งผลการพิจารณาแก่ {selectedApplication.student_name} ระบบจะส่งการแจ้งเตือนผลทันที</Typography>
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
+          <TextField
+            label="หมายเหตุ (ถ้ามี)"
+            value={resultComment}
+            onChange={(e) => setResultComment(e.target.value)}
+            fullWidth
+            multiline
+            minRows={2}
+            sx={{ mb: 2 }}
+          />
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
             <Button
-              key={t}
-              onClick={() => setNotifTab(t)}
-              sx={{ borderRadius: '20px', textTransform: 'none', px: 2.5, bgcolor: notifTab === t ? colors.navy : '#F0F0F0', color: notifTab === t ? '#fff' : colors.navy }}
+              fullWidth
+              variant="contained"
+              disabled={resultSubmitting}
+              onClick={() => submitResult('passed')}
+              sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: colors.ok, '&:hover': { bgcolor: '#1B5F21' } }}
             >
-              {t === 'all' ? 'ทั้งหมด' : t === 'unread' ? 'ยังไม่อ่าน' : 'คำขอเลื่อนนัด'}
+              ผ่านการสัมภาษณ์
             </Button>
-          ))}
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={resultSubmitting}
+              onClick={() => submitResult('failed')}
+              sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
+            >
+              ไม่ผ่านการสัมภาษณ์
+            </Button>
+          </Box>
         </Box>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {visible.map((it) => (
-            <Box key={it.title} sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                <Box sx={{ display: 'flex', gap: 1.5 }}>
-                  <Box sx={{ width: 32, height: 32, borderRadius: 2, bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.icon}</Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 700, fontSize: 14, color: colors.navy }}>{it.title}</Typography>
-                    <Typography sx={{ fontSize: 13, color: '#697077', mt: 0.25 }}>{it.body}</Typography>
-                    {it.reschedule && (
-                      <Button onClick={() => setSubview('reschedule')} sx={{ textTransform: 'none', px: 0, mt: 0.5, color: '#0090FF', fontWeight: 600 }}>ดูรายละเอียดและเลือกวัน →</Button>
-                    )}
-                  </Box>
-                </Box>
-                <Typography sx={{ fontSize: 12, color: '#9AA0A6', flexShrink: 0 }}>{it.time}</Typography>
-              </Box>
-            </Box>
-          ))}
-        </Box>
+        <GmailConfirmDialog
+          open={resultsConfirmOpen}
+          onClose={() => setResultsConfirmOpen(false)}
+          email="student@gmail.com"
+          note="ทำการแจ้งผลการสัมภาษณ์ไปยังผู้สมัครเรียบร้อย หากผ่านสามารถไปสร้างข้อตกลงจ้างงานได้ที่เมนู ตกลงการจ้างงาน"
+          onBack={() => { setResultsConfirmOpen(false); setResultComment(''); setSubview('hub') }}
+        />
       </Box>
     )
   }
 
-  // results
-  const resultRows = employerApplicants.filter((a) => ['interviewed', 'passed', 'failed'].includes(stages[a.id]))
-  return (
-    <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
-      {BackToHub}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 1.5, mb: 2 }}>
-        <Box>
-          <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 28, color: colors.navy }}>แจ้งผลการพิจารณาผ่านการสัมภาษณ์ผู้สมัคร</Typography>
-          <Typography sx={{ fontSize: 14, color: '#697077' }}>บันทึกและแจ้งผลการพิจารณาแก่ผู้สมัครแต่ละคน ระบบจะส่งการแจ้งเตือนผลให้ผู้สมัครทันที</Typography>
-        </Box>
-        <Button variant="contained" onClick={() => setResultsConfirmOpen(true)} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}>ยืนยันแจ้งผลทั้งหมด</Button>
-      </Box>
-      <TextField
-        placeholder="ค้นหาชื่อผู้สมัคร หรือ ตำแหน่งงาน..."
-        size="small"
-        fullWidth
-        sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '20px' } }}
-        slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchOutlinedIcon fontSize="small" /></InputAdornment> } }}
-      />
-      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 2.5fr', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
-          {['ผู้สมัคร', 'ตำแหน่ง', 'สถานะ', 'ผลการพิจารณา'].map((h) => (
-            <Typography key={h} sx={{ fontSize: 12, fontWeight: 700, color: '#697077' }}>{h}</Typography>
-          ))}
-        </Box>
-        {resultRows.map((a, index) => {
-          const stage = stages[a.id]
-          const chip = employerApplicantStageChip[stage]
-          return (
-            <Box key={a.id} sx={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 2.5fr', alignItems: 'center', px: 2.5, py: 1.75, borderTop: index > 0 ? `1px solid ${colors.border}` : 'none' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-                <Box sx={{ width: 30, height: 30, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12 }}>{a.initial}</Box>
-                <Typography sx={{ fontWeight: 600, fontSize: 13 }}>{a.name}</Typography>
-              </Box>
-              <Typography sx={{ fontSize: 13 }}>{a.position}</Typography>
-              <Chip label={chip.label} size="small" sx={{ bgcolor: chip.bg, color: chip.color, fontWeight: 600, justifySelf: 'start' }} />
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  onClick={() => setResult(a.id, 'invited')}
-                  size="small"
-                  sx={{ borderRadius: '20px', textTransform: 'none', px: 1.5, fontSize: 12, bgcolor: stage === 'invited' ? colors.navy : '#F0F0F0', color: stage === 'invited' ? '#fff' : colors.navy }}
-                >
-                  เชิญสัมภาษณ์
-                </Button>
-                <Button
-                  onClick={() => setResult(a.id, 'passed')}
-                  size="small"
-                  sx={{ borderRadius: '20px', textTransform: 'none', px: 1.5, fontSize: 12, bgcolor: stage === 'passed' ? colors.ok : '#F0F0F0', color: stage === 'passed' ? '#fff' : colors.navy }}
-                >
-                  ผ่านการสัมภาษณ์
-                </Button>
-                <Button
-                  onClick={() => setResult(a.id, 'failed')}
-                  size="small"
-                  sx={{ borderRadius: '20px', textTransform: 'none', px: 1.5, fontSize: 12, bgcolor: stage === 'failed' ? '#DA1E28' : '#F0F0F0', color: stage === 'failed' ? '#fff' : colors.navy }}
-                >
-                  ไม่ผ่านการสัมภาษณ์
-                </Button>
-              </Box>
-            </Box>
-          )
-        })}
-      </Box>
-      <Typography sx={{ fontSize: 13, color: '#697077', mt: 1.5 }}>
-        เลือกผลแล้ว {resultRows.filter((a) => stages[a.id] === 'passed' || stages[a.id] === 'failed').length} จาก {resultRows.length} รายการ • ผู้ที่ &quot;ผ่านการสัมภาษณ์&quot; จะถูกส่งต่อไปขั้นตอนสร้างข้อตกลงการจ้างงาน
-      </Typography>
-      <GmailConfirmDialog
-        open={resultsConfirmOpen}
-        onClose={() => setResultsConfirmOpen(false)}
-        email="job-student@gmail.com"
-        note="ทำการแจ้งผลการสัมภาษณ์ไปยังผู้สมัครเรียบร้อย สามารถทำข้อตกลงสัญญาจ้างงานได้ครับ"
-        onBack={() => { setResultsConfirmOpen(false); setSubview('hub') }}
-      />
-    </Box>
-  )
+  return null
 }
 
 export default function InterviewsPage() {

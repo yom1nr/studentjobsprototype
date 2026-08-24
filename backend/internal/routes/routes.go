@@ -17,6 +17,8 @@ func SetupRouter(
     jobpostHandler *controllers.JobpostController,
     studentHandler *controllers.StudentController,
     applicationHandler *controllers.ApplicationController,
+    interviewHandler *controllers.InterviewController,
+    employmentHandler *controllers.EmploymentController,
 ) *gin.Engine {
     router := gin.New()
     router.Use(gin.Logger())
@@ -65,6 +67,32 @@ func SetupRouter(
     employer.GET("/applications", applicationHandler.ListEmployerApplications)
     employer.GET("/applications/:id", applicationHandler.GetEmployerApplicationDetail)
     employer.POST("/applications/:id/review", applicationHandler.ReviewApplication)
+
+    // Employer: interview scheduling (B6733827 subsystem 1)
+    employer.POST("/interviews", interviewHandler.CreateInterview)
+    employer.PUT("/interviews/:id", interviewHandler.UpdateInterview)
+    employer.POST("/interviews/:id/result", interviewHandler.SendResult)
+
+    // Employer: employment agreements (B6733827 subsystem 2)
+    employer.POST("/agreements", employmentHandler.CreateAgreement)
+
+    // Student: confirm interview attendance / respond to reschedule requests
+    student.POST("/interviews/:id/confirm", interviewHandler.ConfirmAttendance)
+
+    // Student: respond to an employment agreement
+    student.POST("/agreements/:id/accept", employmentHandler.Accept)
+    student.POST("/agreements/:id/reject", employmentHandler.Reject)
+
+    // Interviews / agreements — shared reads and reschedule requests (any authenticated role)
+    interviews := api.Group("/interviews")
+    interviews.Use(middleware.JWTAuthMiddleware())
+    interviews.GET("", interviewHandler.ListMine)
+    interviews.POST("/:id/reschedule", interviewHandler.RequestReschedule)
+    interviews.GET("/:id/reschedules", interviewHandler.ListReschedules)
+
+    agreements := api.Group("/agreements")
+    agreements.Use(middleware.JWTAuthMiddleware())
+    agreements.GET("", employmentHandler.ListMine)
 
     // Admin: employer verification workflow
     admin := api.Group("/admin")

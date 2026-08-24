@@ -40,6 +40,9 @@ func main() {
     applicationController := controllers.NewApplicationController(db)
     interviewController := controllers.NewInterviewController(db)
     employmentController := controllers.NewEmploymentController(db)
+    timeRecordController := controllers.NewTimeRecordController(db)
+    payrollController := controllers.NewPayrollController(db)
+    complaintController := controllers.NewComplaintController(db)
 
     router := routes.SetupRouter(
         authController,
@@ -52,6 +55,9 @@ func main() {
         applicationController,
         interviewController,
         employmentController,
+        timeRecordController,
+        payrollController,
+        complaintController,
     )
     router.Use(gin.Recovery())
 

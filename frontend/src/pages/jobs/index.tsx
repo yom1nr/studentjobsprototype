@@ -329,7 +329,9 @@ function StudentJobSearchView() {
       </Box>
 
       <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>
-        ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box>
+        {query.trim().length === 0
+          ? 'แนะนำสำหรับคุณ'
+          : <>ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box></>}
       </Typography>
 
       {loading ? (

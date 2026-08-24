@@ -19,6 +19,9 @@ func SetupRouter(
     applicationHandler *controllers.ApplicationController,
     interviewHandler *controllers.InterviewController,
     employmentHandler *controllers.EmploymentController,
+    timeRecordHandler *controllers.TimeRecordController,
+    payrollHandler *controllers.PayrollController,
+    complaintHandler *controllers.ComplaintController,
 ) *gin.Engine {
     router := gin.New()
     router.Use(gin.Logger())
@@ -94,6 +97,38 @@ func SetupRouter(
     agreements.Use(middleware.JWTAuthMiddleware())
     agreements.GET("", employmentHandler.ListMine)
 
+    // Student: time tracking (B6729875 subsystem 1)
+    student.POST("/time-records/check-in", timeRecordHandler.CheckIn)
+    student.POST("/time-records/:id/check-out", timeRecordHandler.CheckOut)
+    student.GET("/time-records", timeRecordHandler.ListMyTimeRecords)
+    student.POST("/time-records/:id/edit-request", timeRecordHandler.CreateEditRequest)
+
+    // Employer: time-edit approval queue
+    employer.GET("/time-records", timeRecordHandler.ListEmployerTimeRecords)
+    employer.GET("/time-edit-requests", timeRecordHandler.ListEmployerEditRequests)
+    employer.POST("/time-edit-requests/:id/approve", timeRecordHandler.ApproveEditRequest)
+    employer.POST("/time-edit-requests/:id/reject", timeRecordHandler.RejectEditRequest)
+
+    // Employer: payroll calculation + payment (B6729875 subsystem 2)
+    employer.POST("/payrolls", payrollHandler.CreatePayroll)
+    employer.POST("/payrolls/:id/approve", payrollHandler.ApprovePayroll)
+
+    // Student: confirm payment receipt
+    student.POST("/payrolls/:id/confirm", payrollHandler.ConfirmReceipt)
+
+    // Payroll — shared read (any authenticated role)
+    payrolls := api.Group("/payrolls")
+    payrolls.Use(middleware.JWTAuthMiddleware())
+    payrolls.GET("", payrollHandler.ListMine)
+
+    // Complaints (B6716493 subsystem 1) — submit/read own (any authenticated role)
+    complaints := api.Group("/complaints")
+    complaints.Use(middleware.JWTAuthMiddleware())
+    complaints.POST("", complaintHandler.Create)
+    complaints.GET("", complaintHandler.ListMine)
+    complaints.GET("/:id", complaintHandler.GetDetail)
+    complaints.POST("/:id/attachments", complaintHandler.AddAttachment)
+
     // Admin: employer verification workflow
     admin := api.Group("/admin")
     admin.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("admin"))
@@ -101,6 +136,8 @@ func SetupRouter(
     admin.GET("/employers/:id", adminHandler.GetEmployerDetail)
     admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)
     admin.POST("/employers/:id/reject", adminHandler.RejectEmployer)
+    admin.GET("/complaints", complaintHandler.ListAll)
+    admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
 
     // Notifications (any authenticated role)
     notifications := api.Group("/notifications")

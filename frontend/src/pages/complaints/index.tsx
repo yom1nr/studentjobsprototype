@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
@@ -11,7 +11,6 @@ import {
   InputAdornment,
   Menu,
   MenuItem,
-  Select,
   TextField,
   Typography,
 } from '@mui/material'
@@ -26,6 +25,15 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { ApiError } from '../../services/https'
+import {
+  addComplaintAttachment,
+  addComplaintHistory,
+  createComplaint,
+  listAllComplaints,
+  listMyComplaints,
+} from '../../services/https/complaints'
 import type { Complaint, ComplaintActionRole, ComplaintHistoryEntry, ComplaintStatus } from '../../interface/IComplaintInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6' }
@@ -48,97 +56,9 @@ const roleLabel: Record<ComplaintActionRole, string> = {
 const ALLOWED_UPLOAD_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp']
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 
-let nextComplaintId = 6
-let nextHistoryId = 100
-
-// Mock complaint data (with embedded status history) until a /complaints
-// endpoint exists — this subsystem is UI + Go models only per project scope.
-const INITIAL_COMPLAINTS: Complaint[] = [
-  {
-    id: 1,
-    title: 'นายจ้างไม่ตอบกลับข้อความ',
-    description: 'ส่งข้อความสอบถามตารางงานแต่ไม่ได้รับการตอบกลับมากว่า 1 สัปดาห์',
-    reference_type: 'นายจ้าง',
-    status: 'resolved',
-    resolution_detail:
-      'เจ้าหน้าได้ประสานงานกับผู้ประกอบการเรียบร้อยแล้ว บริษัทจะดำเนินการตอบกลับภายใน 2 วัน หากไม่ได้รับการตอบกลับ สามารถแจ้งร้องเรียนเพิ่มได้',
-    created_at: '2026-05-20T14:30:00',
-    updated_at: '2026-05-24T10:30:00',
-    submitter_name: 'นาย กฤษฎา ใจดี',
-    submitter_role: 'student',
-    attachments: [],
-    histories: [
-      { id: 1, status: 'resolved', action_by_role: 'admin', note: 'ได้ติดต่อผู้ประกอบการแล้ว ผู้ประกอบการจะติดต่อกลับภายใน 2 วัน', timestamp: '2026-05-24T10:30:00' },
-      { id: 2, status: 'in_review', action_by_role: 'admin', note: 'เจ้าหน้าได้ประสานงานกับผู้ประกอบการ', timestamp: '2026-05-22T15:30:00' },
-      { id: 3, status: 'submitted', action_by_role: 'system', note: 'ได้รับเรื่องร้องเรียนเรียบร้อย', timestamp: '2026-05-20T14:30:00' },
-    ],
-  },
-  {
-    id: 2,
-    title: 'ได้เงินไม่ครบ',
-    description: 'ยังไม่ได้รับเงินตามรอบจ่ายที่แจ้งไว้',
-    reference_type: 'ค่าตอบแทน',
-    status: 'in_review',
-    resolution_detail: '',
-    created_at: '2026-05-18T09:00:00',
-    updated_at: '2026-05-19T11:00:00',
-    submitter_name: 'นาย กฤษฎา ใจดี',
-    submitter_role: 'student',
-    attachments: [],
-    histories: [
-      { id: 1, status: 'in_review', action_by_role: 'admin', note: 'อยู่ระหว่างตรวจสอบข้อมูลการจ่ายเงินกับฝ่ายบัญชีของบริษัท', timestamp: '2026-05-19T11:00:00' },
-      { id: 2, status: 'submitted', action_by_role: 'system', note: 'ได้รับเรื่องร้องเรียนเรียบร้อย', timestamp: '2026-05-18T09:00:00' },
-    ],
-  },
-  {
-    id: 3,
-    title: 'นักศึกษาขาดบ่อย',
-    description: 'นักศึกษาฝึกงานขาดงานโดยไม่แจ้งล่วงหน้าหลายครั้ง',
-    reference_type: 'การทำงาน',
-    status: 'resolved',
-    resolution_detail: 'ได้ตักเตือนนักศึกษาและปรับตารางงานใหม่เรียบร้อยแล้ว',
-    created_at: '2026-05-08T10:00:00',
-    updated_at: '2026-05-10T13:00:00',
-    submitter_name: 'บริษัท ABC',
-    submitter_role: 'employer',
-    attachments: [],
-    histories: [
-      { id: 1, status: 'resolved', action_by_role: 'admin', note: 'ได้ตักเตือนนักศึกษาและปรับตารางงานใหม่เรียบร้อยแล้ว', timestamp: '2026-05-10T13:00:00' },
-      { id: 2, status: 'submitted', action_by_role: 'system', note: 'ได้รับเรื่องร้องเรียนเรียบร้อย', timestamp: '2026-05-08T10:00:00' },
-    ],
-  },
-  {
-    id: 4,
-    title: 'สถานที่ไม่ปลอดภัย',
-    description: 'อุปกรณ์ในที่ทำงานชำรุดและไม่ได้รับการซ่อมแซม',
-    reference_type: 'สถานที่ทำงาน',
-    status: 'submitted',
-    resolution_detail: '',
-    created_at: '2026-05-02T08:30:00',
-    updated_at: '2026-05-02T08:30:00',
-    submitter_name: 'นาย กฤษฎา ใจดี',
-    submitter_role: 'student',
-    attachments: [],
-    histories: [{ id: 1, status: 'submitted', action_by_role: 'system', note: 'ได้รับเรื่องร้องเรียนเรียบร้อย', timestamp: '2026-05-02T08:30:00' }],
-  },
-  {
-    id: 5,
-    title: 'อื่นๆ',
-    description: 'ต้องการสอบถามข้อมูลเพิ่มเติมเกี่ยวกับสัญญาจ้าง',
-    reference_type: 'อื่น ๆ',
-    status: 'resolved',
-    resolution_detail: 'ชี้แจงรายละเอียดสัญญาจ้างให้บริษัทเรียบร้อยแล้ว',
-    created_at: '2026-04-30T09:00:00',
-    updated_at: '2026-05-01T09:00:00',
-    submitter_name: 'บริษัท XYZ',
-    submitter_role: 'employer',
-    attachments: [],
-    histories: [
-      { id: 1, status: 'resolved', action_by_role: 'admin', note: 'ชี้แจงรายละเอียดสัญญาจ้างให้บริษัทเรียบร้อยแล้ว', timestamp: '2026-05-01T09:00:00' },
-      { id: 2, status: 'submitted', action_by_role: 'system', note: 'ได้รับเรื่องร้องเรียนเรียบร้อย', timestamp: '2026-04-30T09:00:00' },
-    ],
-  },
-]
+function apiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
+}
 
 function complaintCode(id: number): string {
   return `C${String(id).padStart(3, '0')}`
@@ -187,10 +107,11 @@ type FormStep = 'form' | 'incomplete'
 
 function MyComplaintsView() {
   usePageTitle('แจ้งปัญหา / ร้องเรียน')
-  const { user } = useAuth()
-  const myRole: 'student' | 'employer' = user?.role === 'employer' ? 'employer' : 'student'
+  const { token } = useAuth()
 
-  const [complaints, setComplaints] = useState(() => INITIAL_COMPLAINTS.filter((c) => c.submitter_role === myRole))
+  const [complaints, setComplaints] = useState<Complaint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null)
   const [statusFilter, setStatusFilter] = useState<ComplaintStatus[]>([])
@@ -205,10 +126,29 @@ function MyComplaintsView() {
   const [description, setDescription] = useState('')
   const [attachments, setAttachments] = useState<{ file_name: string; file_size: number }[]>([])
   const [successOpen, setSuccessOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const data = await listMyComplaints(token!)
+        if (!cancelled) setComplaints(data)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อร้องเรียนไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [token])
 
   function toggleStatusFilter(s: ComplaintStatus) {
     setStatusFilter((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
@@ -235,32 +175,27 @@ function MyComplaintsView() {
     setAttachments([])
   }
 
-  function handleSubmitClick() {
+  async function handleSubmitClick() {
     if (title.trim().length === 0 || type === '' || description.trim().length === 0) {
       setFormStep('incomplete')
       return
     }
-    const nextId = nextComplaintId++
-    const now = new Date().toISOString()
-    setComplaints((prev) => [
-      {
-        id: nextId,
-        title: title.trim(),
-        description: description.trim(),
-        reference_type: type,
-        status: 'submitted',
-        resolution_detail: '',
-        created_at: now,
-        updated_at: now,
-        submitter_name: myRole === 'employer' ? 'ผู้ประกอบการ (คุณ)' : 'นักศึกษา (คุณ)',
-        submitter_role: myRole,
-        attachments,
-        histories: [{ id: nextHistoryId++, status: 'submitted', action_by_role: 'system', note: 'ได้รับเรื่องร้องเรียนเรียบร้อย', timestamp: now }],
-      },
-      ...prev,
-    ])
-    closeForm()
-    setSuccessOpen(true)
+    if (!token) return
+    setSubmitting(true)
+    try {
+      const created = await createComplaint(token, { title: title.trim(), description: description.trim(), reference_type: type })
+      let finalComplaint = created
+      for (const a of attachments) {
+        finalComplaint = await addComplaintAttachment(token, created.id, { file_name: a.file_name, file_size: a.file_size })
+      }
+      setComplaints((prev) => [finalComplaint, ...prev])
+      closeForm()
+      setSuccessOpen(true)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ส่งข้อร้องเรียนไม่สำเร็จ'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -295,9 +230,14 @@ function MyComplaintsView() {
 
   const selected = complaints.find((c) => c.id === selectedId) ?? null
 
+  if (loading) {
+    return <Box sx={{ maxWidth: 1000, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
+  }
+
   if (view === 'detail' && selected) {
     return (
       <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+        <ErrorAlert message={error} />
         <Typography sx={{ fontSize: 13, color: '#697077', mb: 1 }}>
           <Box component="span" sx={{ cursor: 'pointer', color: '#0F62FE' }} onClick={() => setView('list')}>ข้อร้องเรียน</Box>
           {' > '}รายละเอียด
@@ -361,6 +301,7 @@ function MyComplaintsView() {
 
   return (
     <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
+      <ErrorAlert message={error} />
       <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2, mb: 1 }}>
         <Box>
           <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 26, color: colors.navy }}>ข้อร้องเรียนของฉัน</Typography>
@@ -526,10 +467,11 @@ function MyComplaintsView() {
               <Button
                 fullWidth
                 variant="contained"
-                onClick={handleSubmitClick}
+                disabled={submitting}
+                onClick={() => void handleSubmitClick()}
                 sx={{ mt: 3, height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
               >
-                ส่งข้อร้องเรียน
+                {submitting ? 'กำลังส่ง...' : 'ส่งข้อร้องเรียน'}
               </Button>
             </>
           )}
@@ -616,14 +558,36 @@ const ADMIN_TABS: { key: 'all' | ComplaintStatus; label: string }[] = [
 
 function AdminComplaintsView() {
   usePageTitle('จัดการข้อร้องเรียน')
+  const { token } = useAuth()
 
-  const [complaints, setComplaints] = useState(INITIAL_COMPLAINTS)
+  const [complaints, setComplaints] = useState<Complaint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'all' | ComplaintStatus>('all')
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [nextStatus, setNextStatus] = useState<ComplaintStatus>('in_review')
   const [note, setNote] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const data = await listAllComplaints(token!)
+        if (!cancelled) setComplaints(data)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อร้องเรียนไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [token])
 
   const filtered = complaints.filter((c) => {
     const q = search.toLowerCase()
@@ -641,31 +605,31 @@ function AdminComplaintsView() {
     setActionError(null)
   }
 
-  function submitUpdate() {
-    if (!selected) return
+  async function submitUpdate() {
+    if (!selected || !token) return
     if (note.trim().length === 0) {
       setActionError('กรุณาระบุหมายเหตุการดำเนินการ')
       return
     }
-    const now = new Date().toISOString()
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === selected.id
-          ? {
-              ...c,
-              status: nextStatus,
-              updated_at: now,
-              resolution_detail: nextStatus === 'resolved' ? note.trim() : c.resolution_detail,
-              histories: [{ id: nextHistoryId++, status: nextStatus, action_by_role: 'admin', note: note.trim(), timestamp: now }, ...c.histories],
-            }
-          : c,
-      ),
-    )
-    setSelectedId(null)
+    setSubmitting(true)
+    try {
+      const updated = await addComplaintHistory(token, selected.id, { status: nextStatus, note: note.trim() })
+      setComplaints((prev) => prev.map((c) => (c.id === selected.id ? updated : c)))
+      setSelectedId(null)
+    } catch (err) {
+      setActionError(apiErrorMessage(err, 'บันทึกผลไม่สำเร็จ'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return <Box sx={{ maxWidth: 1100, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
   }
 
   return (
     <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+      <ErrorAlert message={error} />
       <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 26, color: colors.navy, mb: 0.5 }}>จัดการข้อร้องเรียน</Typography>
       <Typography sx={{ fontSize: 13, color: '#697077', mb: 3 }}>ตรวจสอบและดำเนินการข้อร้องเรียนจากนักศึกษาและผู้ประกอบการ</Typography>
 
@@ -778,10 +742,10 @@ function AdminComplaintsView() {
               <Box sx={{ borderTop: `1px solid ${colors.border}`, pt: 2 }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 14, color: colors.navy, mb: 1.5 }}>บันทึกผลการดำเนินการ</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                  <Select size="small" value={nextStatus} onChange={(e) => setNextStatus(e.target.value as ComplaintStatus)}>
+                  <TextField select size="small" value={nextStatus} onChange={(e) => setNextStatus(e.target.value as ComplaintStatus)}>
                     <MenuItem value="in_review">กำลังดำเนินการ</MenuItem>
                     <MenuItem value="resolved">เสร็จสิ้น</MenuItem>
-                  </Select>
+                  </TextField>
                   <TextField
                     label="หมายเหตุ"
                     value={note}
@@ -792,7 +756,8 @@ function AdminComplaintsView() {
                   />
                   <Button
                     variant="contained"
-                    onClick={submitUpdate}
+                    disabled={submitting}
+                    onClick={() => void submitUpdate()}
                     sx={{ alignSelf: 'flex-end', borderRadius: '40px', textTransform: 'none', px: 3, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
                   >
                     บันทึก

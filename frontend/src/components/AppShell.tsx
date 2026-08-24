@@ -79,15 +79,22 @@ const payrollNavItemByRole: Record<string, NavItem> = {
   student: { label: 'รายรับ', icon: <AccountBalanceWalletOutlinedIcon />, path: '/payroll' },
 }
 
+// Student sees their own interview appointment/result; employer manages every
+// applicant's interview scheduling — same route, per B6733827's design.
+const interviewsNavItemByRole: Record<string, NavItem> = {
+  employer: { label: 'จัดการนัดหมายสัมภาษณ์', icon: <EventNoteOutlinedIcon />, path: '/interviews' },
+  student: { label: 'ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์', icon: <EventNoteOutlinedIcon />, path: '/interviews' },
+}
+
+// Student reads/accepts the offer sent to them; employer authors and sends it.
+const employmentNavItemByRole: Record<string, NavItem> = {
+  employer: { label: 'ตกลงการจ้างงาน', icon: <CampaignOutlinedIcon />, path: '/employment' },
+  student: { label: 'แจ้งผลการจ้างงาน', icon: <CampaignOutlinedIcon />, path: '/employment' },
+}
+
 const mainNavItems: NavItem[] = [
   { label: 'หน้าหลัก',     icon: <HomeOutlinedIcon />,                      path: '/profile' },
   { label: 'งานของฉัน',    icon: <WorkOutlineIcon />,                       path: '/my-jobs' },
-  {
-    label: 'ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์',
-    icon: <EventNoteOutlinedIcon />,
-    path: '/interviews',
-  },
-  { label: 'แจ้งผลการจ้างงาน', icon: <CampaignOutlinedIcon />,             path: '/employment' },
   { label: 'เวลาทำงาน',    icon: <AccessTimeOutlinedIcon />,                path: '/time-tracking' },
   { label: 'แจ้งปัญหา / ร้องเรียน', icon: <ReportProblemOutlinedIcon />,   path: '/complaints' },
 ]
@@ -164,16 +171,18 @@ function AppShellInner() {
   const jobsNavItem = jobsNavItemByRole[user?.role ?? 'student'] ?? jobsNavItemByRole.student
   const applicationsNavItem = applicationsNavItemByRole[user?.role ?? 'student'] ?? applicationsNavItemByRole.student
   const payrollNavItem = payrollNavItemByRole[user?.role ?? 'student'] ?? payrollNavItemByRole.student
+  const interviewsNavItem = interviewsNavItemByRole[user?.role ?? 'student'] ?? interviewsNavItemByRole.student
+  const employmentNavItem = employmentNavItemByRole[user?.role ?? 'student'] ?? employmentNavItemByRole.student
   const visibleMainNavItems = [
     mainNavItems[0], // หน้าหลัก
     jobsNavItem,
     mainNavItems[1], // งานของฉัน
     applicationsNavItem,
-    mainNavItems[2], // ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์
-    mainNavItems[3], // แจ้งผลการจ้างงาน
-    mainNavItems[4], // เวลาทำงาน
+    interviewsNavItem,
+    employmentNavItem,
+    mainNavItems[2], // เวลาทำงาน
     payrollNavItem,
-    mainNavItems[5], // แจ้งปัญหา / ร้องเรียน
+    mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
     ...(user?.role === 'admin' ? [adminApplicationsNavItem, adminNavItem] : []),
   ]
 

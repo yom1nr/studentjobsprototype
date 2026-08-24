@@ -13,7 +13,7 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import DrawOutlinedIcon from '@mui/icons-material/DrawOutlined'
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
-import MailOutlineIcon from '@mui/icons-material/MailOutline'
+import MailOutlineIcon from '@mui/icons-material/MailOutlineOutlined'
 import { useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
@@ -551,7 +551,10 @@ function EmployerInterviewsView() {
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🟠 ยังไม่นัดสัมภาษณ์ <Chip label={`${notScheduled.length} คน`} size="small" sx={{ ml: 0.5 }} /></Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🟠 ยังไม่นัดสัมภาษณ์</Typography>
+              <Chip label={`${notScheduled.length} คน`} size="small" />
+            </Box>
             <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>ผ่านการคัดเลือกใบสมัครแล้ว รอนัดสัมภาษณ์</Typography>
             {notScheduled.map((a) => (
               <Box key={a.student_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
@@ -568,7 +571,10 @@ function EmployerInterviewsView() {
             {notScheduled.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 2 }}>ไม่มีรายการ</Typography>}
           </Box>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🔵 นัดสัมภาษณ์แล้ว <Chip label={`${scheduled.length} คน`} size="small" sx={{ ml: 0.5 }} /></Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>🔵 นัดสัมภาษณ์แล้ว</Typography>
+              <Chip label={`${scheduled.length} คน`} size="small" />
+            </Box>
             <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>มีนัดสัมภาษณ์แล้ว — พร้อมแจ้งผลและจัดทำข้อตกลงการจ้างงาน</Typography>
             {scheduled.map((a) => (
               <Box key={a.student_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>

@@ -3,7 +3,7 @@ import { Box, Button, Chip, Dialog, IconButton, MenuItem, TextField, Typography 
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
-import MailOutlineIcon from '@mui/icons-material/MailOutline'
+import MailOutlineIcon from '@mui/icons-material/MailOutlineOutlined'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
 import { useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'

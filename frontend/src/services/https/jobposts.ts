@@ -1,11 +1,11 @@
 import type { Jobpost, UpsertJobpostRequest } from '../../interface/IJobInterface'
 import { apiFetch } from './index'
 
-export function listOpenJobposts(token: string): Promise<Jobpost[]> {
+export function listOpenJobposts(token?: string | null): Promise<Jobpost[]> {
   return apiFetch<Jobpost[]>('/api/v1/jobposts', { token })
 }
 
-export function getJobpostDetail(token: string, id: number): Promise<Jobpost> {
+export function getJobpostDetail(token: string | null | undefined, id: number): Promise<Jobpost> {
   return apiFetch<Jobpost>(`/api/v1/jobposts/${id}`, { token })
 }
 

@@ -1,8 +1,11 @@
+import { Box, CircularProgress } from '@mui/material'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { useAuth } from '../auth/useAuth'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { PublicOnlyRoute } from '../components/PublicOnlyRoute'
 import { RoleRoute } from '../components/RoleRoute'
 import FullLayout from '../layout/FullLayout'
+import GuestLayout from '../layout/GuestLayout'
 import MiniLayout from '../layout/MiniLayout'
 import LoginPage from '../pages/authentication/Login'
 import RegisterPage from '../pages/authentication/Register'
@@ -26,7 +29,24 @@ import AdminApplicationVerificationPage from '../pages/admin/applications'
 import NotFoundPage from '../pages/not-found'
 
 function HomeRedirect() {
-  return <Navigate to="/profile" replace />
+  const { token, isLoading } = useAuth()
+  if (isLoading) return null
+  return <Navigate to={token ? '/profile' : '/jobs'} replace />
+}
+
+// /jobs is reachable both signed out (browse/search only) and signed in
+// (real apply for students, posting management for employers) — pick the
+// shell to match, since GuestLayout has no sidebar/notifications/logout.
+function JobsRouteShell() {
+  const { token, isLoading } = useAuth()
+  if (isLoading) {
+    return (
+      <Box sx={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
+        <CircularProgress />
+      </Box>
+    )
+  }
+  return token ? <FullLayout /> : <GuestLayout />
 }
 
 export function MainRoutes() {
@@ -45,11 +65,15 @@ export function MainRoutes() {
           </Route>
         </Route>
 
+        {/* /jobs is reachable signed out or signed in — kept outside ProtectedRoute */}
+        <Route element={<JobsRouteShell />}>
+          <Route path="/jobs" element={<JobsPage />} />
+        </Route>
+
         <Route element={<ProtectedRoute />}>
           <Route element={<FullLayout />}>
             <Route path="/profile" element={<DashboardPage />} />
             <Route path="/time-tracking" element={<TimeTrackingPage />} />
-            <Route path="/jobs" element={<JobsPage />} />
             <Route path="/my-jobs" element={<MyJobsPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/interviews" element={<InterviewsPage />} />

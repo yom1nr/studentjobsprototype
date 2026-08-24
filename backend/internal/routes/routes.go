@@ -52,9 +52,8 @@ func SetupRouter(
     employer.PUT("/jobposts/:id", jobpostHandler.UpdateJobpost)
     employer.POST("/jobposts/:id/close", jobpostHandler.CloseJobpost)
 
-    // Job posts — browsing (any authenticated role)
+    // Job posts — public browsing (no login required; only applying needs an account)
     jobposts := api.Group("/jobposts")
-    jobposts.Use(middleware.JWTAuthMiddleware())
     jobposts.GET("", jobpostHandler.ListOpenJobposts)
     jobposts.GET("/:id", jobpostHandler.GetJobpostDetail)
 

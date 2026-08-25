@@ -8,7 +8,7 @@ import (
 
 // User is the base account for all roles in the system.
 type User struct {
-	gorm.Model
+	UserID   uint   `gorm:"primaryKey;autoIncrement" json:"user_id"` 
 	UserName string  `gorm:"size:100;not null" json:"user_name"`
 	Password string  `gorm:"size:255;not null" json:"-"`
 	Email    string  `gorm:"size:150;uniqueIndex;not null" json:"email"`
@@ -22,12 +22,13 @@ type User struct {
 	Admin    *Admin    `gorm:"foreignKey:UserID" json:"admin,omitempty"`
 
 	Complaints []Complaint `gorm:"foreignKey:UserID" json:"complaints,omitempty"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 // Student profile – linked to a User account (1-to-1).
 type Student struct {
-	gorm.Model
-	UserID      uint      `gorm:"not null;uniqueIndex" json:"user_id"`
+	UserID uint `gorm:"primaryKey;not null" json:"user_id"`
+	User   User `gorm:"foreignKey:UserID;references:UserID" json:"-"`
 	FirstName   string    `gorm:"size:100;not null" json:"first_name"`
 	LastName    string    `gorm:"size:100;not null" json:"last_name"`
 	DateOfBirth *time.Time `json:"date_of_birth"`
@@ -44,12 +45,13 @@ type Student struct {
 	InterviewSchedules  []InterviewSchedule  `gorm:"foreignKey:StudentID" json:"interview_schedules,omitempty"`
 	EmploymentAgreements []EmploymentAgreement `gorm:"foreignKey:StudentID" json:"employment_agreements,omitempty"`
 	TimeRecords         []TimeRecord         `gorm:"foreignKey:StudentID" json:"time_records,omitempty"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 // Employer profile – linked to a User account (1-to-1).
 type Employer struct {
-	gorm.Model
-	UserID         uint   `gorm:"not null;uniqueIndex" json:"user_id"`
+	UserID uint `gorm:"primaryKey;not null" json:"user_id"`
+	User   User `gorm:"foreignKey:UserID;references:UserID" json:"-"`
 	FirstName      string `gorm:"size:100;not null" json:"first_name"`
 	LastName       string `gorm:"size:100;not null" json:"last_name"`
 	Position       string `gorm:"size:100" json:"position"`
@@ -68,12 +70,13 @@ type Employer struct {
 	EmploymentAgreements []EmploymentAgreement `gorm:"foreignKey:EmployerID" json:"employment_agreements,omitempty"`
 	TimeEditRequests    []TimeEditRequest     `gorm:"foreignKey:EmployerID" json:"time_edit_requests,omitempty"`
 	Payrolls            []Payroll             `gorm:"foreignKey:EmployerID" json:"payrolls,omitempty"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 // Admin profile – linked to a User account (1-to-1).
 type Admin struct {
-	gorm.Model
-	UserID     uint   `gorm:"not null;uniqueIndex" json:"user_id"`
+	UserID uint `gorm:"primaryKey;not null" json:"user_id"`
+	User   User `gorm:"foreignKey:UserID;references:UserID" json:"-"`
 	FirstName  string `gorm:"size:100;not null" json:"first_name"`
 	LastName   string `gorm:"size:100;not null" json:"last_name"`
 	Position   string `gorm:"size:100" json:"position"`
@@ -83,4 +86,5 @@ type Admin struct {
 	// Relations
 	Approves          []Approve          `gorm:"foreignKey:AdminID" json:"approves,omitempty"`
 	ApplicationAudits []ApplicationAudit `gorm:"foreignKey:AdminID" json:"application_audits,omitempty"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }

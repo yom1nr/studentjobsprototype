@@ -10,7 +10,7 @@ import (
 // "3 เดือน") per the actual create/edit design, not a date — the class
 // diagram typed it as dateTime, but the UI never shows a date picker for it.
 type Jobpost struct {
-	gorm.Model
+	JobpostID uint   `gorm:"primaryKey;autoIncrement" json:"jobpost_id"`
 	EmployerID      uint      `gorm:"not null;index" json:"employer_id"`
 	Position        string    `gorm:"size:150;not null" json:"position"`
 	JobType         string    `gorm:"size:100" json:"job_type"`
@@ -26,6 +26,7 @@ type Jobpost struct {
 
 	// Relations
 	Applications []Application `gorm:"foreignKey:JobpostID" json:"applications,omitempty"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 // Application is a student's job application for a Jobpost.

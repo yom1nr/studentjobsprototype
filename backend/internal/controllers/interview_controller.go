@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -190,9 +191,15 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 	}
 
 	role, _ := utils.GetUserRoleFromContext(c)
+	requestedBy := "student"
+	if role == "employer" {
+		requestedBy = "employer"
+	}
 	reschedule := &models.RescheduleInterview{
 		InterviewScheduleID: interview.ID,
 		RescheduleReason:    payload.Reason,
+		RequestedBy:         requestedBy,
+		Status:              "pending",
 	}
 	if t, err := time.Parse(time.RFC3339, payload.StudentAvailableDateTime); err == nil {
 		reschedule.StudentAvailableDateTime = &t
@@ -204,6 +211,7 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "request failed", err.Error())
 		return
 	}
+	h.db.Model(&interview).Update("status", "rescheduling")
 
 	var student models.Student
 	h.db.First(&student, interview.StudentID)
@@ -261,6 +269,19 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 		return
 	}
 
+	// Persist the outcome so the student can re-open the result page later and
+	// the employer can see which candidates have already been told.
+	now := time.Now()
+	if err := h.db.Model(interview).Updates(map[string]any{
+		"result":              payload.Result,
+		"result_comment":      payload.Comment,
+		"result_announced_at": &now,
+		"status":              "completed",
+	}).Error; err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+		return
+	}
+
 	var student models.Student
 	h.db.First(&student, interview.StudentID)
 
@@ -273,13 +294,14 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 	if payload.Comment != "" {
 		message += " (" + payload.Comment + ")"
 	}
-	notifyUser(h.db, student.UserID, "ผลการพิจารณาสัมภาษณ์", "interview_result", message)
+	notifyAboutInterview(h.db, student.UserID, "ผลการพิจารณาสัมภาษณ์", "interview_result", message, interview.ID)
 
-	utils.JSONSuccess(c, http.StatusOK, gin.H{"sent": true})
+	utils.JSONSuccess(c, http.StatusOK, gin.H{"sent": true, "result": payload.Result})
 }
 
 // ConfirmAttendance lets the student confirm they'll attend a scheduled interview.
-// Confirmation isn't a persisted field either — it's a notification back to the employer.
+// The confirmation is persisted on the schedule so the UI can show the
+// "รอการยืนยัน" / "ยืนยันแล้ว" badge, and a notification goes to the employer.
 func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 	userID, ok := utils.GetUserIDFromContext(c)
 	if !ok {
@@ -303,14 +325,24 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		return
 	}
 
+	confirmedAt := time.Now()
+	if err := h.db.Model(&interview).Updates(map[string]any{
+		"status":       "confirmed",
+		"confirmed_at": &confirmedAt,
+	}).Error; err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+		return
+	}
+
 	appointmentDate := ""
 	if interview.AppointmentDate != nil {
 		appointmentDate = interview.AppointmentDate.Format("2006-01-02")
 	}
 	var employer models.Employer
 	if err := h.db.First(&employer, interview.EmployerID).Error; err == nil {
-		notifyUser(h.db, employer.UserID, "นักศึกษายืนยันเข้ารับสัมภาษณ์", "interview_confirmed",
-			fmt.Sprintf("%s ยืนยันนัดสัมภาษณ์วันที่ %s เวลา %s น. แล้ว", h.studentName(student.ID), appointmentDate, interview.AppointmentTime))
+		notifyAboutInterview(h.db, employer.UserID, "นักศึกษายืนยันเข้ารับสัมภาษณ์", "interview_confirmed",
+			fmt.Sprintf("%s ยืนยันนัดสัมภาษณ์วันที่ %s เวลา %s น. แล้ว", h.studentName(student.ID), appointmentDate, interview.AppointmentTime),
+			interview.ID)
 	}
 
 	utils.JSONSuccess(c, http.StatusOK, gin.H{"confirmed": true})
@@ -388,6 +420,9 @@ func (h *InterviewController) mapToResponse(iv *models.InterviewSchedule, compan
 		AppointmentTime:    iv.AppointmentTime,
 		Location:           iv.Location,
 		PreparationDetails: iv.PreparationDetails,
+		Status:             iv.Status,
+		Result:             iv.Result,
+		ResultComment:      iv.ResultComment,
 		CreatedAt:          iv.CreatedAt.Format(time.RFC3339),
 		Reschedules:        reschedules,
 	}
@@ -408,5 +443,20 @@ func mapRescheduleToResponse(r *models.RescheduleInterview) dto.RescheduleRespon
 		NewAppointmentDateTime:   newAppointment,
 		RescheduleReason:         r.RescheduleReason,
 		CreatedAt:                r.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+// notifyAboutInterview is notifyUser plus a link back to the interview that
+// triggered it, so the notification list can deep-link into the appointment.
+func notifyAboutInterview(db *gorm.DB, userID uint, title, notificationType, message string, interviewID uint) {
+	n := &models.Notification{
+		UserID:              userID,
+		InterviewScheduleID: &interviewID,
+		Title:               title,
+		NotificationType:    notificationType,
+		Message:             message,
+	}
+	if err := db.Create(n).Error; err != nil {
+		log.Printf("failed to create notification for user %d: %v", userID, err)
 	}
 }

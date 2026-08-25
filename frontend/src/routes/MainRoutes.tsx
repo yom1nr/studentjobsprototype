@@ -12,6 +12,7 @@ import RegisterPage from '../pages/authentication/Register'
 import RegisterStudentPage from '../pages/authentication/RegisterStudent'
 import RegisterEmployerPage from '../pages/authentication/RegisterEmployer'
 import ForgotPasswordPage from '../pages/authentication/ForgotPassword'
+import LandingPage from '../pages/landing'
 import DashboardPage from '../pages/dashboard'
 import TimeTrackingPage from '../pages/time-tracking'
 import JobsPage from '../pages/jobs'
@@ -31,7 +32,8 @@ import NotFoundPage from '../pages/not-found'
 function HomeRedirect() {
   const { token, isLoading } = useAuth()
   if (isLoading) return null
-  return <Navigate to={token ? '/profile' : '/jobs'} replace />
+  if (token) return <Navigate to="/profile" replace />
+  return <LandingPage />
 }
 
 // /jobs is reachable both signed out (browse/search only) and signed in

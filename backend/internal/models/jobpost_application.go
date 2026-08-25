@@ -11,7 +11,7 @@ import (
 // diagram typed it as dateTime, but the UI never shows a date picker for it.
 type Jobpost struct {
 	JobpostID uint   `gorm:"primaryKey;autoIncrement" json:"jobpost_id"`
-	EmployerID      uint      `gorm:"not null;index" json:"employer_id"`
+	UserID         uint       `gorm:"not null;index" json:"user_id"`
 	Position        string    `gorm:"size:150;not null" json:"position"`
 	JobType         string    `gorm:"size:100" json:"job_type"`
 	JobDescription  string    `gorm:"type:text" json:"job_description"`
@@ -25,6 +25,7 @@ type Jobpost struct {
 	Status          string    `gorm:"size:50;not null;default:'open'" json:"status"` // open | closed | draft
 
 	// Relations
+	User         *User         `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Applications []Application `gorm:"foreignKey:JobpostID" json:"applications,omitempty"`
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }

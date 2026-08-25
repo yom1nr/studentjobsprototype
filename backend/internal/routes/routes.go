@@ -138,6 +138,11 @@ func SetupRouter(
     admin.GET("/complaints", complaintHandler.ListAll)
     admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
 
+    // Admin: final pass/fail verification on employer-accepted applications
+    admin.GET("/applications", applicationHandler.ListAdminApplications)
+    admin.GET("/applications/:id", applicationHandler.GetAdminApplicationDetail)
+    admin.POST("/applications/:id/verify", applicationHandler.VerifyApplication)
+
     // Notifications (any authenticated role)
     notifications := api.Group("/notifications")
     notifications.Use(middleware.JWTAuthMiddleware())

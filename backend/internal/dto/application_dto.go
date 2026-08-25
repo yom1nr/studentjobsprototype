@@ -29,3 +29,27 @@ type ReviewApplicationRequest struct {
 	ResultStatus string `json:"result_status" validate:"required,oneof=accepted rejected correction_requested"`
 	Comment      string `json:"comment" validate:"omitempty"`
 }
+
+// VerifyApplicationRequest is the university admin's final pass/fail decision on
+// an application the employer has already accepted.
+type VerifyApplicationRequest struct {
+	ResultStatus string `json:"result_status" validate:"required,oneof=passed failed"`
+	Comment      string `json:"comment" validate:"omitempty"`
+}
+
+// AdminApplicationResponse is an employer-accepted application enriched with the
+// university admin's own verification status (separate from Application.Status,
+// which reflects only the employer's accept/reject decision).
+type AdminApplicationResponse struct {
+	ID                uint   `json:"id"`
+	JobpostID         uint   `json:"jobpost_id"`
+	Position          string `json:"position"`
+	CompanyName       string `json:"company_name"`
+	StudentID         uint   `json:"student_id"`
+	StudentName       string `json:"student_name"`
+	StudentUniversity string `json:"student_university"`
+	Status            string `json:"status"`
+	ReviewStatus      string `json:"review_status"` // awaiting | passed | failed
+	Comment           string `json:"comment"`
+	CheckedAt         string `json:"checked_at"`
+}

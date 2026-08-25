@@ -1,42 +1,23 @@
-import { useState } from 'react'
-import { Box, Button, Chip, IconButton, InputAdornment, TextField, Typography } from '@mui/material'
+import { useEffect, useState } from 'react'
+import { Alert, Box, Button, Chip, IconButton, InputAdornment, TextField, Typography } from '@mui/material'
 import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { usePageTitle } from '../../../components/usePageTitle'
+import { ErrorAlert } from '../../../components/ErrorAlert'
+import { useAuth } from '../../../auth/useAuth'
+import { ApiError } from '../../../services/https'
+import { getAdminApplicationDetail, listAdminApplications, verifyApplication } from '../../../services/https/applications'
+import type { AdminApplication, AdminApplicationReviewStatus } from '../../../interface/IJobInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6' }
 
-// Admin's final pass/fail check, distinct from the employer's own
-// accept/reject on Application.status — mirrors the ApplicationAudit class
-// (ResultStatus/Comment/CheckedAt) from the B6716493 class diagram. UI +
-// mock data only, per project scope — no backend controller for this yet.
-type AdminReviewStatus = 'awaiting' | 'passed' | 'failed'
-
-type AdminApplicationRow = {
-  id: number
-  code: string
-  studentName: string
-  position: string
-  companyName: string
-  status: AdminReviewStatus
-  note: string
-  checkedAt: string | null
-}
-
-const statusMap: Record<AdminReviewStatus, { label: string; color: string; bg: string }> = {
+const statusMap: Record<AdminApplicationReviewStatus, { label: string; color: string; bg: string }> = {
   awaiting: { label: 'กำลังตรวจสอบ', color: '#B5850C', bg: '#FFF6E0' },
   passed: { label: 'ผ่านการคัดเลือก', color: '#217829', bg: '#EAF7EA' },
   failed: { label: 'ไม่ผ่านการคัดเลือก', color: '#DA1E28', bg: '#FDEAEA' },
 }
-
-const INITIAL_ROWS: AdminApplicationRow[] = [
-  { id: 1, code: 'APP-2401-001', studentName: 'นาย กฤษฎา ใจดี', position: 'พนักงานเสิร์ฟ', companyName: 'ร้านกาแฟดีใจ', status: 'passed', note: '', checkedAt: '2026-05-26T11:30:00' },
-  { id: 2, code: 'APP-2401-007', studentName: 'นางสาว พิมพ์ชนก แสนดี', position: 'แคชเชียร์', companyName: 'ร้านสะดวกซื้อ 24 ชม.', status: 'awaiting', note: '', checkedAt: null },
-  { id: 3, code: 'APP-2401-011', studentName: 'นาย กิตติพงษ์ ใจดี', position: 'พนักงานเสิร์ฟ', companyName: 'ร้านอาหารตามสั่ง', status: 'awaiting', note: '', checkedAt: null },
-  { id: 4, code: 'APP-2401-014', studentName: 'นางสาว สุนิสา ทองมาก', position: 'พนักงานคลังสินค้า', companyName: 'บริษัท ABC จำกัด', status: 'failed', note: 'เอกสารแนบไม่ครบถ้วน', checkedAt: '2026-05-25T09:10:00' },
-]
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -46,38 +27,90 @@ type View = 'list' | 'detail' | 'success'
 
 export default function AdminApplicationVerificationPage() {
   usePageTitle('ตรวจสอบใบสมัคร')
+  const { token } = useAuth()
 
-  const [rows, setRows] = useState(INITIAL_ROWS)
+  const [rows, setRows] = useState<AdminApplication[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const [search, setSearch] = useState('')
   const [view, setView] = useState<View>('list')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [note, setNote] = useState('')
-  const [lastResult, setLastResult] = useState<AdminReviewStatus>('passed')
+  const [lastResult, setLastResult] = useState<AdminApplication | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await listAdminApplications(token!)
+        if (!cancelled) setRows(data)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'โหลดข้อมูลไม่สำเร็จ')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [token])
 
   const filtered = rows.filter(
-    (r) => r.code.toLowerCase().includes(search.toLowerCase()) || r.studentName.toLowerCase().includes(search.toLowerCase()) || r.position.toLowerCase().includes(search.toLowerCase()),
+    (r) =>
+      String(r.id).includes(search.toLowerCase()) ||
+      r.student_name.toLowerCase().includes(search.toLowerCase()) ||
+      r.position.toLowerCase().includes(search.toLowerCase()),
   )
 
   const selected = rows.find((r) => r.id === selectedId) ?? null
 
-  function openDetail(row: AdminApplicationRow) {
+  async function openDetail(row: AdminApplication) {
     setSelectedId(row.id)
-    setNote(row.note)
+    setNote(row.comment)
+    setActionError(null)
     setView('detail')
+    if (!token) return
+    try {
+      const detail = await getAdminApplicationDetail(token, row.id)
+      setRows((prev) => prev.map((r) => (r.id === detail.id ? detail : r)))
+      setNote(detail.comment)
+    } catch {
+      // keep the row's already-loaded data if the refetch fails
+    }
   }
 
   function backToList() {
     setView('list')
     setSelectedId(null)
     setNote('')
+    setActionError(null)
   }
 
-  function submitResult(result: 'passed' | 'failed') {
-    if (!selected) return
-    const now = new Date().toISOString()
-    setRows((prev) => prev.map((r) => (r.id === selected.id ? { ...r, status: result, note: note.trim(), checkedAt: now } : r)))
-    setLastResult(result)
-    setView('success')
+  async function submitResult(result: 'passed' | 'failed') {
+    if (!token || !selected) return
+    setSubmitting(true)
+    setActionError(null)
+    try {
+      const updated = await verifyApplication(token, selected.id, { result_status: result, comment: note.trim() })
+      setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+      setLastResult(updated)
+      setView('success')
+    } catch (err) {
+      setActionError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกผลไม่สำเร็จ')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (view === 'detail' && selected) {
@@ -90,13 +123,15 @@ export default function AdminApplicationVerificationPage() {
           ตรวจสอบใบสมัคร
         </Typography>
 
+        <ErrorAlert message={actionError} />
+
         <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3, mb: 2.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Row label="รหัสใบสมัคร" value={selected.code} strong />
-          <Row label="นักศึกษา" value={selected.studentName} />
-          <Row label="ตำแหน่งงาน" value={`${selected.position} (${selected.companyName})`} />
+          <Row label="รหัสใบสมัคร" value={`APP-${String(selected.id).padStart(4, '0')}`} strong />
+          <Row label="นักศึกษา" value={selected.student_name} />
+          <Row label="ตำแหน่งงาน" value={`${selected.position} (${selected.company_name})`} />
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography sx={{ fontSize: 14, color: '#697077' }}>สถานะ</Typography>
-            <Chip label={statusMap[selected.status].label} size="small" sx={{ bgcolor: statusMap[selected.status].bg, color: statusMap[selected.status].color, fontWeight: 600 }} />
+            <Chip label={statusMap[selected.review_status].label} size="small" sx={{ bgcolor: statusMap[selected.review_status].bg, color: statusMap[selected.review_status].color, fontWeight: 600 }} />
           </Box>
         </Box>
 
@@ -114,14 +149,16 @@ export default function AdminApplicationVerificationPage() {
         <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
           <Button
             variant="outlined"
-            onClick={() => submitResult('failed')}
+            disabled={submitting}
+            onClick={() => void submitResult('failed')}
             sx={{ borderRadius: '40px', textTransform: 'none', px: 3, color: '#DA1E28', borderColor: '#DA1E28', '&:hover': { borderColor: '#B01319', bgcolor: '#FDEAEA' } }}
           >
             ไม่ผ่าน
           </Button>
           <Button
             variant="contained"
-            onClick={() => submitResult('passed')}
+            disabled={submitting}
+            onClick={() => void submitResult('passed')}
             sx={{ borderRadius: '40px', textTransform: 'none', px: 3, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
           >
             ผ่าน
@@ -131,19 +168,19 @@ export default function AdminApplicationVerificationPage() {
     )
   }
 
-  if (view === 'success' && selected) {
+  if (view === 'success' && lastResult) {
     return (
       <Box sx={{ maxWidth: 520, mx: 'auto', textAlign: 'center', pt: 4 }}>
         <CheckCircleIcon sx={{ fontSize: 96, color: '#2E7D32' }} />
         <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mt: 2, mb: 3 }}>บันทึกผลการตรวจสอบเรียบร้อย</Typography>
 
         <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3, mb: 3, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Row label="รหัสใบสมัคร" value={selected.code} strong />
+          <Row label="รหัสใบสมัคร" value={`APP-${String(lastResult.id).padStart(4, '0')}`} strong />
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography sx={{ fontSize: 14, color: '#697077' }}>ผลการตรวจสอบ</Typography>
-            <Chip label={statusMap[lastResult].label} size="small" sx={{ bgcolor: statusMap[lastResult].bg, color: statusMap[lastResult].color, fontWeight: 600 }} />
+            <Chip label={statusMap[lastResult.review_status].label} size="small" sx={{ bgcolor: statusMap[lastResult.review_status].bg, color: statusMap[lastResult.review_status].color, fontWeight: 600 }} />
           </Box>
-          <Row label="วันที่ตรวจสอบ" value={selected.checkedAt ? formatDateTime(selected.checkedAt) : '-'} />
+          <Row label="วันที่ตรวจสอบ" value={lastResult.checked_at ? formatDateTime(lastResult.checked_at) : '-'} />
         </Box>
 
         <Button
@@ -158,6 +195,8 @@ export default function AdminApplicationVerificationPage() {
 
   return (
     <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+      <ErrorAlert message={error} />
+
       <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 26, color: colors.navy, mb: 0.5 }}>ตรวจสอบใบสมัคร</Typography>
       <Typography sx={{ fontSize: 13, color: '#697077', mb: 3 }}>ตรวจสอบและยืนยันผลใบสมัครงานที่ผ่านการอนุมัติจากผู้ประกอบการแล้ว</Typography>
 
@@ -171,40 +210,44 @@ export default function AdminApplicationVerificationPage() {
         slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchOutlinedIcon fontSize="small" /></InputAdornment> } }}
       />
 
-      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr 150px 56px', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
-          {['รหัสใบสมัคร', 'นักศึกษา', 'ตำแหน่งงาน', 'สถานะ', ''].map((h) => (
-            <Typography key={h} sx={{ fontSize: 12, fontWeight: 700, color: '#697077' }}>{h}</Typography>
-          ))}
-        </Box>
-        {filtered.map((r, index) => (
-          <Box
-            key={r.id}
-            onClick={() => openDetail(r)}
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: '150px 1fr 1fr 150px 56px',
-              alignItems: 'center',
-              px: 2.5,
-              py: 1.75,
-              borderTop: index > 0 ? `1px solid ${colors.border}` : 'none',
-              cursor: 'pointer',
-              '&:hover': { bgcolor: '#FAFBFC' },
-            }}
-          >
-            <Typography sx={{ fontSize: 13, fontWeight: 700, color: colors.navy }}>{r.code}</Typography>
-            <Typography sx={{ fontSize: 14, color: colors.navy }}>{r.studentName}</Typography>
-            <Typography sx={{ fontSize: 14, color: '#52545C' }}>{r.position}</Typography>
-            <Chip label={statusMap[r.status].label} size="small" sx={{ bgcolor: statusMap[r.status].bg, color: statusMap[r.status].color, fontWeight: 600, width: 'fit-content' }} />
-            <IconButton size="small" onClick={(e) => { e.stopPropagation(); openDetail(r) }} sx={{ border: `1px solid ${colors.border}`, borderRadius: 1.5 }}>
-              <VisibilityOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-            </IconButton>
+      {loading ? (
+        <Alert severity="info">กำลังโหลดข้อมูล…</Alert>
+      ) : (
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr 150px 56px', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
+            {['รหัสใบสมัคร', 'นักศึกษา', 'ตำแหน่งงาน', 'สถานะ', ''].map((h) => (
+              <Typography key={h} sx={{ fontSize: 12, fontWeight: 700, color: '#697077' }}>{h}</Typography>
+            ))}
           </Box>
-        ))}
-        {filtered.length === 0 && (
-          <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>ไม่พบใบสมัครที่ค้นหา</Typography>
-        )}
-      </Box>
+          {filtered.map((r, index) => (
+            <Box
+              key={r.id}
+              onClick={() => void openDetail(r)}
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '150px 1fr 1fr 150px 56px',
+                alignItems: 'center',
+                px: 2.5,
+                py: 1.75,
+                borderTop: index > 0 ? `1px solid ${colors.border}` : 'none',
+                cursor: 'pointer',
+                '&:hover': { bgcolor: '#FAFBFC' },
+              }}
+            >
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: colors.navy }}>{`APP-${String(r.id).padStart(4, '0')}`}</Typography>
+              <Typography sx={{ fontSize: 14, color: colors.navy }}>{r.student_name}</Typography>
+              <Typography sx={{ fontSize: 14, color: '#52545C' }}>{r.position}</Typography>
+              <Chip label={statusMap[r.review_status].label} size="small" sx={{ bgcolor: statusMap[r.review_status].bg, color: statusMap[r.review_status].color, fontWeight: 600, width: 'fit-content' }} />
+              <IconButton size="small" onClick={(e) => { e.stopPropagation(); void openDetail(r) }} sx={{ border: `1px solid ${colors.border}`, borderRadius: 1.5 }}>
+                <VisibilityOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
+              </IconButton>
+            </Box>
+          ))}
+          {filtered.length === 0 && (
+            <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>ไม่พบใบสมัครที่ค้นหา</Typography>
+          )}
+        </Box>
+      )}
     </Box>
   )
 }

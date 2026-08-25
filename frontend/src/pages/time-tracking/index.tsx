@@ -14,6 +14,17 @@ import LoginOutlinedIcon from '@mui/icons-material/LoginOutlined'
 import { useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { ApiError } from '../../services/https'
+import {
+  approveEditRequest,
+  checkIn,
+  checkOut,
+  listEmployerEditRequests,
+  listMyTimeRecords,
+  rejectEditRequest,
+} from '../../services/https/time-records'
+import type { TimeEditRequestRecord, TimeRecordEntry } from '../../interface/ITimeTrackingInterface'
 
 const colors = {
   title: '#012150',
@@ -21,6 +32,10 @@ const colors = {
   navy: '#000349',
   cardBorder: '#DDE1E6',
   ok: '#217829',
+}
+
+function apiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
 }
 
 // Suranaree University of Technology, reference point for the on-site radius check.
@@ -54,10 +69,14 @@ function simulateNearbyPosition(center: { lat: number; lng: number }, maxMeters:
 function StudentTimeTrackingView() {
   usePageTitle('บันทึกเวลาเข้า-ออกงาน เพื่อคำนวณรายได้โดยอัตโนมัติ')
   const navigate = useNavigate()
+  const { token } = useAuth()
 
   const [now, setNow] = useState(new Date())
   const [position, setPosition] = useState<{ lat: number; lng: number; accuracy: number } | null>(null)
-  const [checkedIn, setCheckedIn] = useState(false)
+  const [openRecord, setOpenRecord] = useState<TimeRecordEntry | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000)
@@ -73,16 +92,62 @@ function StudentTimeTrackingView() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const records = await listMyTimeRecords(token!)
+        if (!cancelled) setOpenRecord(records.find((r) => !r.check_out_time) ?? null)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลเวลาทำงานไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [token])
+
   const distance = position ? haversineMeters(position, WORKPLACE) : null
   const withinRadius = distance !== null && distance <= RADIUS_METERS
 
   const timeParts = now.toLocaleTimeString('en-GB', { hour12: false }).split(':')
+  const checkedIn = openRecord !== null
   const clockColor = checkedIn ? colors.ok : colors.navy
   const mapLat = position?.lat ?? WORKPLACE.lat
   const mapLng = position?.lng ?? WORKPLACE.lng
 
+  async function handleCheckIn() {
+    if (!token || !position) return
+    setSubmitting(true)
+    try {
+      const record = await checkIn(token, { latitude: position.lat, longitude: position.lng })
+      setOpenRecord(record)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'บันทึกเวลาเข้างานไม่สำเร็จ'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleCheckOut() {
+    if (!token || !openRecord) return
+    setSubmitting(true)
+    try {
+      await checkOut(token, openRecord.id)
+      setOpenRecord(null)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'บันทึกเวลาออกงานไม่สำเร็จ'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <Box sx={{ maxWidth: 1300, mx: 'auto' }}>
+      <ErrorAlert message={error} />
       <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, mb: 4 }}>
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -160,12 +225,15 @@ function StudentTimeTrackingView() {
             </Typography>
           </Box>
 
-          {checkedIn ? (
+          {loading ? (
+            <Typography sx={{ fontSize: 13, color: '#697077', mt: 1 }}>กำลังโหลด...</Typography>
+          ) : checkedIn ? (
             <Box sx={{ width: '100%', mt: 1 }}>
               <Button
                 variant="contained"
                 startIcon={<LoginOutlinedIcon />}
-                onClick={() => setCheckedIn(false)}
+                disabled={submitting}
+                onClick={handleCheckOut}
                 sx={{ borderRadius: '14px', textTransform: 'none', fontWeight: 500, px: 3, py: 1.5, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
               >
                 บันทึกเวลาออกงาน (Check-out)
@@ -176,8 +244,8 @@ function StudentTimeTrackingView() {
             <Button
               variant="contained"
               startIcon={<PlayArrowRoundedIcon />}
-              disabled={!withinRadius}
-              onClick={() => setCheckedIn(true)}
+              disabled={!withinRadius || submitting}
+              onClick={handleCheckIn}
               sx={{ mt: 1, borderRadius: '14px', textTransform: 'none', fontWeight: 500, px: 3, py: 1.5, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
             >
               บันทึกเวลาเข้างาน (Check-in)
@@ -242,94 +310,100 @@ function StudentTimeTrackingView() {
 }
 
 // ─── Employer: time-edit request approval ──────────────────────────────────
+// Wired to the real backend (B6729875): edit requests come from
+// GET /employer/time-edit-requests, approve/reject hit the real endpoints.
 
-type TimeEditStatus = 'pending' | 'approved' | 'rejected'
-
-type TimeEditRequestMock = {
-  id: number
-  studentName: string
-  requestDate: string
-  oldTime: string
-  newTime: string
-  reason: string
-  submittedAt: string
-  status: TimeEditStatus
-}
-
-const INITIAL_TIME_EDIT_REQUESTS: TimeEditRequestMock[] = [
-  {
-    id: 1,
-    studentName: 'นายอ้วน อาชัน',
-    requestDate: '15 ก.ค. 2569',
-    oldTime: '10:00 - 12:30 น.',
-    newTime: '09:30 - 13:00 น.',
-    reason: 'ลืมเช็คอิน เนื่องจากระบบขึ้น Error ตอนเข้า ขอแนบ Screenshot ประกอบ',
-    submittedAt: '22 ก.ค. 2569, 14:23 น.',
-    status: 'pending',
-  },
-  {
-    id: 2,
-    studentName: 'นายอ้วน ชิโป้',
-    requestDate: '16 ก.ค. 2569',
-    oldTime: '13:00 - 17:00 น.',
-    newTime: '13:00 - 18:00 น.',
-    reason: 'ทำงานล่วงเวลาแต่ลืมกดออกงาน กะกลับดึกกว่าปกติ',
-    submittedAt: '22 ก.ค. 2569, 15:10 น.',
-    status: 'pending',
-  },
-  {
-    id: 3,
-    studentName: 'นายฟิล์ม จั๋ง',
-    requestDate: '10 ก.ค. 2569',
-    oldTime: '09:00 - 17:00 น.',
-    newTime: '09:00 - 18:00 น.',
-    reason: 'เวลาออกงานผิดพลาด โปรดตรวจสอบบันทึกกล้องวงจรปิด',
-    submittedAt: '18 ก.ค. 2569, 09:05 น.',
-    status: 'approved',
-  },
-]
-
-const timeEditStatusChip: Record<TimeEditStatus, { label: string; color: string; bg: string }> = {
+const timeEditStatusChip: Record<TimeEditRequestRecord['request_status'], { label: string; color: string; bg: string }> = {
   pending: { label: 'รอพิจารณา', color: '#B5850C', bg: '#FFF6E0' },
   approved: { label: 'อนุมัติแล้ว', color: '#217829', bg: '#EAF7EA' },
   rejected: { label: 'ไม่อนุมัติ', color: '#DA1E28', bg: '#FDEAEA' },
 }
 
+function formatDateTime(iso: string): string {
+  if (!iso) return '-'
+  return new Date(iso).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return '-'
+  return new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+}
+
 function EmployerTimeApprovalView() {
   usePageTitle('อนุมัติคำร้องแก้ไขเวลา')
   const navigate = useNavigate()
+  const { token } = useAuth()
 
-  const [requests, setRequests] = useState<TimeEditRequestMock[]>(INITIAL_TIME_EDIT_REQUESTS)
+  const [requests, setRequests] = useState<TimeEditRequestRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState<TimeEditRequestMock | null>(null)
+  const [selected, setSelected] = useState<TimeEditRequestRecord | null>(null)
   const [rejecting, setRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const pendingCount = requests.filter((r) => r.status === 'pending').length
-  const approvedCount = requests.filter((r) => r.status === 'approved').length
-  const rejectedCount = requests.filter((r) => r.status === 'rejected').length
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const data = await listEmployerEditRequests(token!)
+        if (!cancelled) setRequests(data)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดคำร้องขอแก้ไขเวลาไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [token])
 
-  const pendingList = requests.filter((r) => r.status === 'pending')
+  const pendingCount = requests.filter((r) => r.request_status === 'pending').length
+  const approvedCount = requests.filter((r) => r.request_status === 'approved').length
+  const rejectedCount = requests.filter((r) => r.request_status === 'rejected').length
+
+  const pendingList = requests.filter((r) => r.request_status === 'pending')
   const historyList = requests
-    .filter((r) => r.status !== 'pending')
-    .filter((r) => r.studentName.toLowerCase().includes(search.toLowerCase()))
+    .filter((r) => r.request_status !== 'pending')
+    .filter((r) => r.student_name.toLowerCase().includes(search.toLowerCase()))
 
-  function approve(id: number) {
-    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'approved' } : r)))
-    setSelected(null)
+  async function approve(id: number) {
+    if (!token) return
+    setSubmitting(true)
+    try {
+      const updated = await approveEditRequest(token, id)
+      setRequests((prev) => prev.map((r) => (r.id === id ? updated : r)))
+      setSelected(null)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'อนุมัติคำร้องไม่สำเร็จ'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  function confirmReject() {
-    if (!selected) return
-    setRequests((prev) => prev.map((r) => (r.id === selected.id ? { ...r, status: 'rejected' } : r)))
-    setRejecting(false)
-    setRejectReason('')
-    setSelected(null)
+  async function confirmReject() {
+    if (!token || !selected) return
+    setSubmitting(true)
+    try {
+      const updated = await rejectEditRequest(token, selected.id, { reason: rejectReason })
+      setRequests((prev) => prev.map((r) => (r.id === selected.id ? updated : r)))
+      setRejecting(false)
+      setRejectReason('')
+      setSelected(null)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ปฏิเสธคำร้องไม่สำเร็จ'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+      <ErrorAlert message={error} />
       <IconButton
         onClick={() => navigate('/profile')}
         sx={{ bgcolor: '#EFF6FF', color: colors.navy, borderRadius: 2, mb: 1.5 }}
@@ -386,7 +460,9 @@ function EmployerTimeApprovalView() {
         )}
       </Box>
 
-      {tab === 'pending' && (
+      {loading && <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>กำลังโหลด...</Typography>}
+
+      {!loading && tab === 'pending' && (
         <Box sx={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 3, overflow: 'hidden' }}>
           {pendingList.map((r, index) => (
             <Box
@@ -406,16 +482,17 @@ function EmployerTimeApprovalView() {
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 <Box sx={{ width: 36, height: 36, borderRadius: '50%', bgcolor: colors.navy, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
-                  {r.studentName.replace('นาย', '').charAt(0)}
+                  {r.student_name.charAt(0)}
                 </Box>
                 <Box>
-                  <Typography sx={{ fontWeight: 600, fontSize: 15, color: colors.title }}>{r.studentName}</Typography>
-                  <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>ขอแก้ไขวันที่ {r.requestDate}</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 15, color: colors.title }}>{r.student_name}</Typography>
+                  <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>ขอแก้ไขวันที่ {formatDateTime(r.old_check_in_time)}</Typography>
                 </Box>
               </Box>
               <Button
                 variant="contained"
-                onClick={(e) => { e.stopPropagation(); approve(r.id) }}
+                disabled={submitting}
+                onClick={(e) => { e.stopPropagation(); void approve(r.id) }}
                 sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.ok, px: 2.5, '&:hover': { bgcolor: '#1B5F21' } }}
               >
                 อนุมัติ
@@ -428,14 +505,14 @@ function EmployerTimeApprovalView() {
         </Box>
       )}
 
-      {tab === 'history' && (
+      {!loading && tab === 'history' && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {historyList.map((r) => {
-            const status = timeEditStatusChip[r.status]
+            const status = timeEditStatusChip[r.request_status]
             return (
               <Box key={r.id} sx={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 3, overflow: 'hidden', cursor: 'pointer' }} onClick={() => setSelected(r)}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 2.5, py: 2 }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 17, color: colors.title }}>{r.studentName}</Typography>
+                  <Typography sx={{ fontWeight: 700, fontSize: 17, color: colors.title }}>{r.student_name}</Typography>
                   <Chip label={status.label} size="small" sx={{ bgcolor: status.bg, color: status.color, fontWeight: 600 }} />
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', bgcolor: '#F7F9FC', px: 2.5, py: 1.25 }}>
@@ -444,9 +521,9 @@ function EmployerTimeApprovalView() {
                   ))}
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', px: 2.5, py: 1.5 }}>
-                  <Typography sx={{ fontSize: 14 }}>{r.requestDate}</Typography>
-                  <Typography sx={{ fontSize: 14 }}>{r.oldTime}</Typography>
-                  <Typography sx={{ fontSize: 14 }}>{r.newTime}</Typography>
+                  <Typography sx={{ fontSize: 14 }}>{formatDateTime(r.old_check_in_time)}</Typography>
+                  <Typography sx={{ fontSize: 14 }}>{formatTime(r.old_check_in_time)} - {formatTime(r.old_check_out_time)}</Typography>
+                  <Typography sx={{ fontSize: 14 }}>{formatTime(r.new_check_in_time)} - {formatTime(r.new_check_out_time)}</Typography>
                 </Box>
                 <Box sx={{ px: 2.5, pb: 2 }}>
                   <Box sx={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 2, p: 1.5 }}>
@@ -478,7 +555,7 @@ function EmployerTimeApprovalView() {
             </Box>
 
             <Box sx={{ bgcolor: '#EFF6FF', borderRadius: 2, px: 2, py: 1.5, mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, color: colors.navy }}>{selected.studentName}</Typography>
+              <Typography sx={{ fontWeight: 700, color: colors.navy }}>{selected.student_name}</Typography>
             </Box>
 
             <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.title, mb: 1 }}>เวลาเดิมในระบบ</Typography>
@@ -486,14 +563,14 @@ function EmployerTimeApprovalView() {
               <Box sx={{ flex: 1, border: `1px solid ${colors.cardBorder}`, borderRadius: 2, p: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography sx={{ fontSize: 10, color: '#9AA0A6' }}>เวลาเดิม</Typography>
-                  <Typography sx={{ fontSize: 14 }}>{selected.oldTime}</Typography>
+                  <Typography sx={{ fontSize: 14 }}>{formatTime(selected.old_check_in_time)} - {formatTime(selected.old_check_out_time)}</Typography>
                 </Box>
                 <AccessTimeOutlinedIcon fontSize="small" sx={{ color: '#9AA0A6' }} />
               </Box>
               <Box sx={{ flex: 1, border: `1px solid ${colors.cardBorder}`, borderRadius: 2, p: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography sx={{ fontSize: 10, color: '#9AA0A6' }}>เวลาใหม่ที่ขอ</Typography>
-                  <Typography sx={{ fontSize: 14, fontWeight: 600, color: colors.navy }}>{selected.newTime}</Typography>
+                  <Typography sx={{ fontSize: 14, fontWeight: 600, color: colors.navy }}>{formatTime(selected.new_check_in_time)} - {formatTime(selected.new_check_out_time)}</Typography>
                 </Box>
                 <AccessTimeOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
               </Box>
@@ -504,9 +581,9 @@ function EmployerTimeApprovalView() {
               <Typography sx={{ fontSize: 13, color: '#52422A' }}>{selected.reason}</Typography>
             </Box>
 
-            <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 2 }}>ยื่นคำร้องเมื่อ: {selected.submittedAt}</Typography>
+            <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 2 }}>ยื่นคำร้องเมื่อ: {formatDateTime(selected.created_at)}</Typography>
 
-            {selected.status === 'pending' ? (
+            {selected.request_status === 'pending' ? (
               <Box sx={{ display: 'flex', gap: 1.5 }}>
                 <Button
                   fullWidth
@@ -519,7 +596,8 @@ function EmployerTimeApprovalView() {
                 <Button
                   fullWidth
                   variant="contained"
-                  onClick={() => approve(selected.id)}
+                  disabled={submitting}
+                  onClick={() => void approve(selected.id)}
                   sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.ok, '&:hover': { bgcolor: '#1B5F21' } }}
                 >
                   อนุมัติ
@@ -527,8 +605,8 @@ function EmployerTimeApprovalView() {
               </Box>
             ) : (
               <Chip
-                label={timeEditStatusChip[selected.status].label}
-                sx={{ bgcolor: timeEditStatusChip[selected.status].bg, color: timeEditStatusChip[selected.status].color, fontWeight: 600, width: '100%', height: 40 }}
+                label={timeEditStatusChip[selected.request_status].label}
+                sx={{ bgcolor: timeEditStatusChip[selected.request_status].bg, color: timeEditStatusChip[selected.request_status].color, fontWeight: 600, width: '100%', height: 40 }}
               />
             )}
           </Box>
@@ -564,8 +642,8 @@ function EmployerTimeApprovalView() {
           <Button
             fullWidth
             variant="contained"
-            disabled={rejectReason.trim().length === 0}
-            onClick={confirmReject}
+            disabled={rejectReason.trim().length === 0 || submitting}
+            onClick={() => void confirmReject()}
             sx={{ height: 48, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
           >
             ยืนยันการไม่อนุมัติ

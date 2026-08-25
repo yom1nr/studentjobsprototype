@@ -1,4 +1,4 @@
-import type { Application, CreateApplicationRequest, ReviewApplicationRequest } from '../../interface/IJobInterface'
+import type { AdminApplication, Application, CreateApplicationRequest, ReviewApplicationRequest, VerifyApplicationRequest } from '../../interface/IJobInterface'
 import { apiFetch } from './index'
 
 export function createApplication(token: string, payload: CreateApplicationRequest): Promise<Application> {
@@ -19,4 +19,16 @@ export function getEmployerApplicationDetail(token: string, id: number): Promise
 
 export function reviewApplication(token: string, id: number, payload: ReviewApplicationRequest): Promise<Application> {
   return apiFetch<Application>(`/api/v1/employer/applications/${id}/review`, { method: 'POST', token, body: payload })
+}
+
+export function listAdminApplications(token: string): Promise<AdminApplication[]> {
+  return apiFetch<AdminApplication[]>('/api/v1/admin/applications', { token })
+}
+
+export function getAdminApplicationDetail(token: string, id: number): Promise<AdminApplication> {
+  return apiFetch<AdminApplication>(`/api/v1/admin/applications/${id}`, { token })
+}
+
+export function verifyApplication(token: string, id: number, payload: VerifyApplicationRequest): Promise<AdminApplication> {
+  return apiFetch<AdminApplication>(`/api/v1/admin/applications/${id}/verify`, { method: 'POST', token, body: payload })
 }

@@ -7,6 +7,9 @@ import (
 )
 
 // InterviewSchedule represents an interview appointment between a Student and an Employer.
+// Location isn't a literal diagram attribute (same pragmatic addition as
+// EmploymentAgreement.Status above) — it stores the onsite address or the
+// online meeting link shown in the "สถานที่ / ลิงก์สัมภาษณ์" design field.
 type InterviewSchedule struct {
 	gorm.Model
 	StudentID          uint      `gorm:"not null;index" json:"student_id"`
@@ -14,6 +17,7 @@ type InterviewSchedule struct {
 	InterviewFormat    string    `gorm:"size:100" json:"interview_format"` // online | onsite
 	AppointmentTime    string    `gorm:"size:20" json:"appointment_time"`  // e.g. "10:30"
 	AppointmentDate    *time.Time `json:"appointment_date"`
+	Location           string    `gorm:"size:500" json:"location"`
 	PreparationDetails string    `gorm:"type:text" json:"preparation_details"`
 
 	// Relations
@@ -30,6 +34,9 @@ type RescheduleInterview struct {
 }
 
 // EmploymentAgreement is the contract between a Student and an Employer.
+// Status isn't a literal diagram attribute, but is needed to persist the
+// accept/reject decision — same pragmatic addition as Application.Status and
+// Jobpost.Status elsewhere in this codebase (see t04_project_docs_reference).
 type EmploymentAgreement struct {
 	gorm.Model
 	StudentID       uint    `gorm:"not null;index" json:"student_id"`
@@ -40,7 +47,22 @@ type EmploymentAgreement struct {
 	WorkingHours    string  `gorm:"size:100" json:"working_hours"`
 	LeavePolicy     string  `gorm:"type:text" json:"leave_policy"`
 	AdditionalTerms string  `gorm:"type:text" json:"additional_terms"`
+	Status          string  `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | accepted | rejected
+	RejectReason    string  `gorm:"type:text" json:"reject_reason"`
 
 	// Relations
-	Payrolls []Payroll `gorm:"foreignKey:EmploymentAgreementID" json:"payrolls,omitempty"`
+	Payrolls  []Payroll  `gorm:"foreignKey:EmploymentAgreementID" json:"payrolls,omitempty"`
+	Documents []Document `gorm:"foreignKey:EmploymentAgreementID" json:"documents,omitempty"`
+}
+
+// Document is a contract file attached to an EmploymentAgreement (e.g. the signed
+// agreement PDF), per B6733827's class diagram class 10 (subsystem 1) / class 2
+// (subsystem 2) — the same Document class shared across both subsystems.
+type Document struct {
+	gorm.Model
+	EmploymentAgreementID uint      `gorm:"not null;index" json:"employment_agreement_id"`
+	FileName              string    `gorm:"size:255;not null" json:"file_name"`
+	File                  string    `gorm:"size:500" json:"file"` // URL / file path
+	DocumentType          string    `gorm:"size:100" json:"document_type"`
+	CreatedDate           *time.Time `json:"created_date"`
 }

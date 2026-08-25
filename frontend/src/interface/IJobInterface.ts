@@ -62,6 +62,29 @@ export type ReviewApplicationRequest = {
   comment?: string
 }
 
+// The university admin's own final pass/fail check, layered on top of an
+// employer's accept/reject (Application.status) — a separate audit trail.
+export type AdminApplicationReviewStatus = 'awaiting' | 'passed' | 'failed'
+
+export type AdminApplication = {
+  id: number
+  jobpost_id: number
+  position: string
+  company_name: string
+  student_id: number
+  student_name: string
+  student_university: string
+  status: ApplicationStatus
+  review_status: AdminApplicationReviewStatus
+  comment: string
+  checked_at: string
+}
+
+export type VerifyApplicationRequest = {
+  result_status: 'passed' | 'failed'
+  comment?: string
+}
+
 export type InterviewFormat = 'online' | 'onsite'
 export type InterviewResult = 'awaiting' | 'passed' | 'failed'
 

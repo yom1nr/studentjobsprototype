@@ -29,7 +29,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
@@ -155,7 +155,12 @@ function OutcomeDialog({
   )
 }
 
-function JobDetailDialog({ job, onClose, onApply }: Readonly<{ job: Jobpost | null; onClose: () => void; onApply: () => void }>) {
+function JobDetailDialog({
+  job,
+  onClose,
+  onApply,
+  applyLabel = 'ยื่นใบสมัครงาน',
+}: Readonly<{ job: Jobpost | null; onClose: () => void; onApply: () => void; applyLabel?: string }>) {
   return (
     <Dialog open={job !== null} onClose={onClose} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
       {job && (
@@ -221,7 +226,7 @@ function JobDetailDialog({ job, onClose, onApply }: Readonly<{ job: Jobpost | nu
             onClick={onApply}
             sx={{ height: 52, borderRadius: '40px', textTransform: 'none', fontWeight: 600, fontSize: 16, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
           >
-            ยื่นใบสมัครงาน
+            {applyLabel}
           </Button>
         </Box>
       )}
@@ -233,6 +238,7 @@ function StudentJobSearchView() {
   usePageTitle('ค้นหางานพาร์ทไทม์')
   const { token } = useAuth()
   const routerLocation = useLocation()
+  const navigate = useNavigate()
 
   const [jobs, setJobs] = useState<Jobpost[]>([])
   const [loading, setLoading] = useState(true)
@@ -248,13 +254,12 @@ function StudentJobSearchView() {
   const [outcomeMessage, setOutcomeMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!token) return
     let cancelled = false
 
     async function load() {
       setLoading(true)
       try {
-        const data = await listOpenJobposts(token!)
+        const data = await listOpenJobposts(token)
         if (!cancelled) setJobs(data)
       } catch (err) {
         if (!cancelled) {
@@ -286,7 +291,12 @@ function StudentJobSearchView() {
   }, [jobs, query, filters])
 
   async function apply() {
-    if (!selectedJob || !token) return
+    if (!selectedJob) return
+    if (!token) {
+      setSelectedJob(null)
+      navigate('/login')
+      return
+    }
     const jobId = selectedJob.id
     setSelectedJob(null)
     try {
@@ -329,7 +339,9 @@ function StudentJobSearchView() {
       </Box>
 
       <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>
-        ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box>
+        {query.trim().length === 0
+          ? 'แนะนำสำหรับคุณ'
+          : <>ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box></>}
       </Typography>
 
       {loading ? (
@@ -405,7 +417,12 @@ function StudentJobSearchView() {
       </Box>
 
       <FilterDialog key={String(filterOpen)} open={filterOpen} onClose={() => setFilterOpen(false)} value={filters} onApply={setFilters} />
-      <JobDetailDialog job={selectedJob} onClose={() => setSelectedJob(null)} onApply={() => void apply()} />
+      <JobDetailDialog
+        job={selectedJob}
+        onClose={() => setSelectedJob(null)}
+        onApply={() => void apply()}
+        applyLabel={token ? 'ยื่นใบสมัครงาน' : 'เข้าสู่ระบบเพื่อสมัครงาน'}
+      />
       <OutcomeDialog open={outcome !== null} onClose={() => setOutcome(null)} success={outcome === 'success'} message={outcomeMessage} />
     </Box>
   )

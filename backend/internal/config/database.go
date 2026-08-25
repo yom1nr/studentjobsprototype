@@ -47,6 +47,7 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
         &models.InterviewSchedule{},
         &models.RescheduleInterview{},
         &models.EmploymentAgreement{},
+        &models.Document{},
         // Time tracking & payroll
         &models.TimeRecord{},
         &models.TimeEditRequest{},

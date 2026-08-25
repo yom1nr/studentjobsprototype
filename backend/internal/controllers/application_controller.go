@@ -213,6 +213,138 @@ func (h *ApplicationController) ReviewApplication(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapApplicationToResponse(application, employer.CompanyName, name, university, phone, email))
 }
 
+// ListAdminApplications returns employer-accepted applications for the university
+// admin's final verification pass (role=admin only).
+func (h *ApplicationController) ListAdminApplications(c *gin.Context) {
+    var applications []models.Application
+    if err := h.db.
+        Preload("Jobpost").
+        Preload("Audits", func(db *gorm.DB) *gorm.DB { return db.Order("checked_at ASC") }).
+        Where("status = ?", "accepted").
+        Order("created_at DESC").
+        Find(&applications).Error; err != nil {
+        utils.JSONError(c, http.StatusInternalServerError, "failed to load applications", err.Error())
+        return
+    }
+
+    responses := make([]dto.AdminApplicationResponse, 0, len(applications))
+    for i := range applications {
+        var employer models.Employer
+        h.db.Select("company_name").First(&employer, applications[i].Jobpost.EmployerID)
+        name, university, _, _ := h.studentDisplayFields(applications[i].StudentID)
+        responses = append(responses, mapAdminApplicationToResponse(&applications[i], employer.CompanyName, name, university))
+    }
+    utils.JSONSuccess(c, http.StatusOK, responses)
+}
+
+// GetAdminApplicationDetail returns one application for the university admin's
+// verification pass (role=admin only).
+func (h *ApplicationController) GetAdminApplicationDetail(c *gin.Context) {
+    application, ok := h.loadApplicationForAdmin(c)
+    if !ok {
+        return
+    }
+
+    var employer models.Employer
+    h.db.Select("company_name").First(&employer, application.Jobpost.EmployerID)
+    name, university, _, _ := h.studentDisplayFields(application.StudentID)
+    utils.JSONSuccess(c, http.StatusOK, mapAdminApplicationToResponse(application, employer.CompanyName, name, university))
+}
+
+// VerifyApplication records the university admin's final pass/fail decision on an
+// employer-accepted application. This is a separate audit trail from the employer's
+// own accept/reject (Application.Status is left untouched).
+func (h *ApplicationController) VerifyApplication(c *gin.Context) {
+    admin, ok := h.currentAdmin(c)
+    if !ok {
+        return
+    }
+    application, ok := h.loadApplicationForAdmin(c)
+    if !ok {
+        return
+    }
+
+    var payload dto.VerifyApplicationRequest
+    if err := c.ShouldBindJSON(&payload); err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
+        return
+    }
+    if err := h.validate.Struct(payload); err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
+        return
+    }
+
+    audit := &models.ApplicationAudit{
+        ApplicationID: application.ID,
+        AdminID:       &admin.ID,
+        ResultStatus:  payload.ResultStatus,
+        Comment:       payload.Comment,
+        CheckedAt:     time.Now().UTC(),
+    }
+    if err := h.db.Create(audit).Error; err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "verification failed", err.Error())
+        return
+    }
+    application.Audits = append(application.Audits, *audit)
+
+    var student models.Student
+    h.db.First(&student, application.StudentID)
+    message := fmt.Sprintf("ผลการตรวจสอบใบสมัครตำแหน่ง %s: ", application.Jobpost.Position)
+    if payload.ResultStatus == "passed" {
+        message += "ผ่านการตรวจสอบจากเจ้าหน้าที่"
+    } else {
+        message += "ไม่ผ่านการตรวจสอบจากเจ้าหน้าที่"
+    }
+    notifyUser(h.db, student.UserID, "ผลการตรวจสอบใบสมัครงาน", "application_verification", message)
+
+    var employer models.Employer
+    h.db.Select("company_name").First(&employer, application.Jobpost.EmployerID)
+    name, university, _, _ := h.studentDisplayFields(application.StudentID)
+    utils.JSONSuccess(c, http.StatusOK, mapAdminApplicationToResponse(application, employer.CompanyName, name, university))
+}
+
+func (h *ApplicationController) loadApplicationForAdmin(c *gin.Context) (*models.Application, bool) {
+    id, err := utils.ParseUintParam(c, "id")
+    if err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "invalid application id", "id must be a number")
+        return nil, false
+    }
+
+    var application models.Application
+    err = h.db.
+        Preload("Jobpost").
+        Preload("Audits", func(db *gorm.DB) *gorm.DB { return db.Order("checked_at ASC") }).
+        First(&application, id).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            utils.JSONError(c, http.StatusNotFound, "application not found", "no application exists with the given id")
+        } else {
+            utils.JSONError(c, http.StatusBadRequest, "failed to load application", err.Error())
+        }
+        return nil, false
+    }
+    return &application, true
+}
+
+func (h *ApplicationController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
+    userID, ok := utils.GetUserIDFromContext(c)
+    if !ok {
+        utils.JSONError(c, http.StatusUnauthorized, "authorization required", "user id missing from token")
+        return nil, false
+    }
+
+    var admin models.Admin
+    if err := h.db.Where("user_id = ?", userID).First(&admin).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            utils.JSONError(c, http.StatusBadRequest, "action failed", "admin profile not found for current user")
+        } else {
+            utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+        }
+        return nil, false
+    }
+    return &admin, true
+}
+
 func (h *ApplicationController) currentStudent(c *gin.Context) (*models.Student, bool) {
     userID, ok := utils.GetUserIDFromContext(c)
     if !ok {
@@ -311,5 +443,33 @@ func mapApplicationToResponse(app *models.Application, companyName, studentName,
         Remarks:           app.Remarks,
         Status:            app.Status,
         ApplyDate:         applyDate,
+    }
+}
+
+func mapAdminApplicationToResponse(app *models.Application, companyName, studentName, studentUniversity string) dto.AdminApplicationResponse {
+    reviewStatus := "awaiting"
+    comment := ""
+    checkedAt := ""
+    for i := len(app.Audits) - 1; i >= 0; i-- {
+        if app.Audits[i].AdminID != nil {
+            reviewStatus = app.Audits[i].ResultStatus
+            comment = app.Audits[i].Comment
+            checkedAt = app.Audits[i].CheckedAt.Format(time.RFC3339)
+            break
+        }
+    }
+
+    return dto.AdminApplicationResponse{
+        ID:                app.ID,
+        JobpostID:         app.JobpostID,
+        Position:          app.Jobpost.Position,
+        CompanyName:       companyName,
+        StudentID:         app.StudentID,
+        StudentName:       studentName,
+        StudentUniversity: studentUniversity,
+        Status:            app.Status,
+        ReviewStatus:      reviewStatus,
+        Comment:           comment,
+        CheckedAt:         checkedAt,
     }
 }

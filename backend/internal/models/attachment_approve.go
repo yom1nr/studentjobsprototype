@@ -1,6 +1,6 @@
 package models
 
-import "gorm.io/gorm"
+import "time"
 
 // AttachmentStudent stores uploaded files for a student.
 type AttachmentStudent struct {

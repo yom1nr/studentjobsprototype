@@ -84,7 +84,7 @@ type EmploymentAgreement struct {
 	InterviewSchedule *InterviewSchedule `gorm:"foreignKey:InterviewScheduleID" json:"interview_schedule,omitempty"`
 
 	// Relations
-	Payrolls      []Payroll      `gorm:"foreignKey:EmploymentAgreementID" json:"payrolls,omitempty"`
+	Payrolls      []Payroll      `gorm:"foreignKey:AgreementID" json:"payrolls,omitempty"`
 	Documents     []Document     `gorm:"foreignKey:EmploymentAgreementID" json:"documents,omitempty"`
 	Notifications []Notification `gorm:"foreignKey:EmploymentAgreementID" json:"notifications,omitempty"`
 }

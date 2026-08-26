@@ -20,13 +20,19 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
         cfg.DBPort,
     )
 
-    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    // Student/Employer/Admin now share User's primary key (UserID) via a
+    // belongs-to relation declared on both sides. GORM's AutoMigrate follows
+    // that association recursively while still migrating User itself, so it
+    // can try to create e.g. "admins" with a FOREIGN KEY REFERENCES "users"
+    // before the "users" table exists yet, regardless of call order. Disabling
+    // FK constraint creation during migration sidesteps that; referential
+    // integrity for these is already enforced at the application layer.
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{DisableForeignKeyConstraintWhenMigrating: true})
     if err != nil {
         return nil, err
     }
 
     if err := db.AutoMigrate(
-        // Core users
         &models.User{},
         &models.Student{},
         &models.Employer{},

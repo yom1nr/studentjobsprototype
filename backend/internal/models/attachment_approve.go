@@ -30,12 +30,11 @@ type AttachmentEmployer struct {
 // because a freshly-submitted employer profile has no reviewer yet (Status stays
 // "pending" until an admin acts on it).
 type Approve struct {
-	ApproveID uint   `gorm:"primaryKey;autoIncrement" json:"Approve"`
-	UserID              uint      `gorm:"not null;index" json:"user_id"`
-	AdminID      *uint  `gorm:"index" json:"admin_id"`
+	ApproveID    uint      `gorm:"primaryKey;autoIncrement" json:"approve_id"`
+	UserID       uint      `gorm:"not null;index" json:"user_id"`
+	AdminID      *uint     `gorm:"index" json:"admin_id"`
 	DateOfSignUp time.Time `json:"date_of_sign_up"`
-	Status       string `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | approved | rejected
+	Status       string    `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | approved | rejected
 
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	
 }

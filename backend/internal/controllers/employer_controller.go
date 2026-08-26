@@ -75,7 +75,7 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
     var conflicting models.Employer
     conflictQuery := h.db.Where("tax_id = ?", payload.TaxID)
     if employer != nil {
-        conflictQuery = conflictQuery.Where("id != ?", employer.ID)
+        conflictQuery = conflictQuery.Where("id != ?", employer.UserID)
     }
     if err := conflictQuery.First(&conflicting).Error; err == nil {
         utils.JSONError(c, http.StatusBadRequest, "update failed", "tax id already registered to another employer")
@@ -106,8 +106,8 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
             return
         }
         approve := &models.Approve{
-            EmployerID:   employer.ID,
-            DateOfSignUp: time.Now().UTC().Format(time.RFC3339),
+            UserID:       employer.UserID,
+            DateOfSignUp: time.Now().UTC(),
             Status:       "pending",
         }
         if err := h.db.Create(approve).Error; err != nil {
@@ -144,7 +144,7 @@ func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileRespon
     }
 
     return &dto.EmployerProfileResponse{
-        ID:             employer.ID,
+        ID:             employer.UserID,
         UserID:         employer.UserID,
         FirstName:      employer.FirstName,
         LastName:       employer.LastName,

@@ -20,6 +20,7 @@ type User struct {
 	Admin    *Admin    `gorm:"foreignKey:UserID" json:"admin,omitempty"`
 
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // Student profile – linked to a User account (1-to-1).
@@ -36,6 +37,7 @@ type Student struct {
 	Years       string     `gorm:"size:10" json:"years"`
 	Skill       string     `gorm:"type:text" json:"skill"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // Employer profile – linked to a User account (1-to-1).
@@ -52,6 +54,9 @@ type Employer struct {
 	Link           string    `gorm:"size:255" json:"link"`
 	CompanyAddress string    `gorm:"type:text" json:"company_address"`
 	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	Approve *Approve `gorm:"foreignKey:UserID;references:UserID" json:"approve,omitempty"`
 }
 
 // Admin profile – linked to a User account (1-to-1).

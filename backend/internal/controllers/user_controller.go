@@ -222,7 +222,7 @@ func (h *UserController) findByEmail(email string) (*models.User, error) {
 
 func mapUserToResponse(user *models.User) *dto.UserResponse {
     return &dto.UserResponse{
-        ID:        user.ID,
+        ID:        user.UserID,
         UserName:  user.UserName,
         Email:     user.Email,
         Phone:     user.Phone,

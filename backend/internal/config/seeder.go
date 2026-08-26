@@ -112,14 +112,14 @@ func seedAdmin(db *gorm.DB) error {
 	}
 
 	var admin models.Admin
-	err = db.Where("user_id = ?", user.ID).First(&admin).Error
+	err = db.Where("user_id = ?", user.UserID).First(&admin).Error
 	if err != nil {
 		if err != gorm.ErrRecordNotFound {
 			return err
 		}
 
 		admin = models.Admin{
-			UserID:     user.ID,
+			UserID:     user.UserID,
 			FirstName:  "สมปอง",
 			LastName:   "ดูแลระบบ",
 			Position:   "เจ้าหน้าที่ทะเบียน",
@@ -148,7 +148,7 @@ func seedEmployerProfile(db *gorm.DB) error {
 	}
 
 	var employer models.Employer
-	err := db.Where("user_id = ?", user.ID).First(&employer).Error
+	err := db.Where("user_id = ?", user.UserID).First(&employer).Error
 	if err == nil {
 		return nil // already seeded
 	}
@@ -157,7 +157,7 @@ func seedEmployerProfile(db *gorm.DB) error {
 	}
 
 	employer = models.Employer{
-		UserID:         user.ID,
+		UserID:         user.UserID,
 		FirstName:      "สมหญิง",
 		LastName:       "ใจดี",
 		Position:       "เจ้าของร้าน",
@@ -172,8 +172,8 @@ func seedEmployerProfile(db *gorm.DB) error {
 	}
 
 	approve := models.Approve{
-		EmployerID:   employer.ID,
-		DateOfSignUp: time.Now().UTC().Format(time.RFC3339),
+		UserID:       employer.UserID,
+		DateOfSignUp: time.Now().UTC(),
 		Status:       "pending",
 	}
 	if err := db.Create(&approve).Error; err != nil {

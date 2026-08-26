@@ -57,8 +57,8 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 	}
 
 	interview := &models.InterviewSchedule{
-		StudentID:          student.ID,
-		EmployerID:         employer.ID,
+		StudentID:          student.UserID,
+		EmployerID:         employer.UserID,
 		InterviewFormat:    payload.InterviewFormat,
 		AppointmentTime:    payload.AppointmentTime,
 		AppointmentDate:    &date,
@@ -73,7 +73,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 	notifyUser(h.db, student.UserID, "นัดหมายสัมภาษณ์ใหม่", "interview_scheduled",
 		fmt.Sprintf("%s นัดสัมภาษณ์คุณวันที่ %s เวลา %s น.", employer.CompanyName, payload.AppointmentDate, payload.AppointmentTime))
 
-	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(interview, employer.CompanyName, h.studentName(student.ID)))
+	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(interview, employer.CompanyName, h.studentName(student.UserID)))
 }
 
 // ListMine returns interviews scoped to the current user's role (employer sees ones
@@ -93,7 +93,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := h.db.Preload("Reschedules").Where("employer_id = ?", employer.ID).Order("created_at DESC").Find(&interviews).Error; err != nil {
+		if err := h.db.Preload("Reschedules").Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
 			utils.JSONError(c, http.StatusInternalServerError, "failed to load interviews", err.Error())
 			return
 		}
@@ -110,13 +110,13 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
-	if err := h.db.Preload("Reschedules").Where("student_id = ?", student.ID).Order("created_at DESC").Find(&interviews).Error; err != nil {
+	if err := h.db.Preload("Reschedules").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
 		utils.JSONError(c, http.StatusInternalServerError, "failed to load interviews", err.Error())
 		return
 	}
 	responses := make([]dto.InterviewResponse, 0, len(interviews))
 	for i := range interviews {
-		responses = append(responses, h.mapToResponse(&interviews[i], h.companyName(interviews[i].EmployerID), h.studentName(student.ID)))
+		responses = append(responses, h.mapToResponse(&interviews[i], h.companyName(interviews[i].EmployerID), h.studentName(student.UserID)))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -127,7 +127,7 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 	if !ok {
 		return
 	}
-	interview, ok := h.ownedByEmployer(c, employer.ID)
+	interview, ok := h.ownedByEmployer(c, employer.UserID)
 	if !ok {
 		return
 	}
@@ -254,7 +254,7 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 	if !ok {
 		return
 	}
-	interview, ok := h.ownedByEmployer(c, employer.ID)
+	interview, ok := h.ownedByEmployer(c, employer.UserID)
 	if !ok {
 		return
 	}
@@ -320,7 +320,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		return
 	}
 	var interview models.InterviewSchedule
-	if err := h.db.Where("id = ? AND student_id = ?", id, student.ID).First(&interview).Error; err != nil {
+	if err := h.db.Where("id = ? AND student_id = ?", id, student.UserID).First(&interview).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
 		return
 	}
@@ -341,7 +341,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 	var employer models.Employer
 	if err := h.db.First(&employer, interview.EmployerID).Error; err == nil {
 		notifyAboutInterview(h.db, employer.UserID, "นักศึกษายืนยันเข้ารับสัมภาษณ์", "interview_confirmed",
-			fmt.Sprintf("%s ยืนยันนัดสัมภาษณ์วันที่ %s เวลา %s น. แล้ว", h.studentName(student.ID), appointmentDate, interview.AppointmentTime),
+			fmt.Sprintf("%s ยืนยันนัดสัมภาษณ์วันที่ %s เวลา %s น. แล้ว", h.studentName(student.UserID), appointmentDate, interview.AppointmentTime),
 			interview.ID)
 	}
 

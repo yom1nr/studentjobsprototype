@@ -79,7 +79,7 @@ func (h *AuthController) Register(c *gin.Context) {
         return
     }
 
-    token, err := h.jwtProvider.GenerateToken(user.ID, user.Role)
+    token, err := h.jwtProvider.GenerateToken(user.UserID, user.Role)
     if err != nil {
         utils.JSONError(c, http.StatusBadRequest, msgRegistrationFailed, err.Error())
         return
@@ -88,7 +88,7 @@ func (h *AuthController) Register(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusCreated, dto.AuthResponse{
         Token: token,
         User: dto.UserResponse{
-            ID:        user.ID,
+            ID:        user.UserID,
             UserName:  user.UserName,
             Email:     user.Email,
             Phone:     user.Phone,
@@ -128,7 +128,7 @@ func (h *AuthController) Login(c *gin.Context) {
         return
     }
 
-    token, err := h.jwtProvider.GenerateToken(user.ID, user.Role)
+    token, err := h.jwtProvider.GenerateToken(user.UserID, user.Role)
     if err != nil {
         utils.JSONError(c, http.StatusUnauthorized, msgLoginFailed, err.Error())
         return
@@ -137,7 +137,7 @@ func (h *AuthController) Login(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, dto.AuthResponse{
         Token: token,
         User: dto.UserResponse{
-            ID:        user.ID,
+            ID:        user.UserID,
             UserName:  user.UserName,
             Email:     user.Email,
             Phone:     user.Phone,

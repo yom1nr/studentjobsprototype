@@ -45,7 +45,7 @@ func (h *PayrollController) CreatePayroll(c *gin.Context) {
 	}
 
 	var agreement models.EmploymentAgreement
-	if err := h.db.Where("id = ? AND employer_id = ? AND status = ?", payload.EmploymentAgreementID, employer.UserID, "accepted").First(&agreement).Error; err != nil {
+	if err := h.db.Where("agreement_id = ? AND employer_id = ? AND status = ?", payload.EmploymentAgreementID, employer.UserID, "accepted").First(&agreement).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "agreement not found", "no accepted agreement exists with the given id for your account")
 		return
 	}
@@ -73,7 +73,7 @@ func (h *PayrollController) CreatePayroll(c *gin.Context) {
 	netPay := totalHours * agreement.WageRate
 
 	payroll := &models.Payroll{
-		AgreementID:    agreement.ID,
+		AgreementID:    agreement.AgreementID,
 		CycleStartDate: &start,
 		CycleEndDate:   &end,
 		TotalHours:     totalHours,

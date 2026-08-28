@@ -1,17 +1,15 @@
 package models
 
-import (
-	"time"
-
-	"gorm.io/gorm"
-)
+import "time"
 
 // InterviewSchedule represents an interview appointment between a Student and an Employer.
 // Location isn't a literal diagram attribute (same pragmatic addition as
 // EmploymentAgreement.Status above) — it stores the onsite address or the
 // online meeting link shown in the "สถานที่ / ลิงก์สัมภาษณ์" design field.
 type InterviewSchedule struct {
-	gorm.Model
+	InterviewID        uint       `gorm:"primaryKey" json:"interview_id"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 	StudentID          uint       `gorm:"not null;index" json:"student_id"`
 	EmployerID         uint       `gorm:"not null;index" json:"employer_id"`
 	InterviewFormat    string     `gorm:"size:100" json:"interview_format"` // online | onsite
@@ -44,7 +42,9 @@ type InterviewSchedule struct {
 
 // RescheduleInterview records a request to change an interview time.
 type RescheduleInterview struct {
-	gorm.Model
+	RescheduleID             uint       `gorm:"primaryKey" json:"reschedule_id"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
 	InterviewScheduleID      uint       `gorm:"not null;index" json:"interview_schedule_id"`
 	StudentAvailableDateTime *time.Time `json:"student_available_date_time"`
 	NewAppointmentDateTime   *time.Time `json:"new_appointment_date_time"`
@@ -67,7 +67,9 @@ type RescheduleInterview struct {
 // accept/reject decision — same pragmatic addition as Application.Status and
 // Jobpost.Status elsewhere in this codebase (see t04_project_docs_reference).
 type EmploymentAgreement struct {
-	gorm.Model
+	AgreementID         uint       `gorm:"primaryKey" json:"agreement_id"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 	StudentID           uint       `gorm:"not null;index" json:"student_id"`
 	EmployerID          uint       `gorm:"not null;index" json:"employer_id"`
 	InterviewScheduleID *uint      `gorm:"index" json:"interview_schedule_id"` // interview this agreement stemmed from (per class diagram)
@@ -97,7 +99,9 @@ type EmploymentAgreement struct {
 // EmploymentAgreement. InterviewScheduleID is nullable so a document can be tied
 // back to the specific interview it originated from without requiring one.
 type Document struct {
-	gorm.Model
+	DocumentID uint      `gorm:"primaryKey" json:"document_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 	// Nullable so the history page can also list documents that belong to an
 	// interview only (IV-xxxx) and not to any agreement (AG-xxxx).
 	EmploymentAgreementID *uint      `gorm:"index" json:"employment_agreement_id"`

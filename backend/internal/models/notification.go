@@ -1,6 +1,6 @@
 package models
 
-import "gorm.io/gorm"
+import "time"
 
 // Notification is an in-app message sent to a user (e.g. employer-approval
 // decisions, interview/agreement updates). CreatedAt from gorm.Model doubles
@@ -11,10 +11,12 @@ import "gorm.io/gorm"
 // addressed to a User, but only some carry a source reference (approval-decision
 // notifications, for instance, have neither).
 type Notification struct {
-	gorm.Model
-	UserID                uint  `gorm:"not null;index" json:"user_id"`
-	RescheduleInterviewID *uint `gorm:"index" json:"reschedule_interview_id"`
-	EmploymentAgreementID *uint `gorm:"index" json:"employment_agreement_id"`
+	NotificationID        uint      `gorm:"primaryKey" json:"notification_id"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	UserID                uint      `gorm:"not null;index" json:"user_id"`
+	RescheduleInterviewID *uint     `gorm:"index" json:"reschedule_interview_id"`
+	EmploymentAgreementID *uint     `gorm:"index" json:"employment_agreement_id"`
 	// Some notifications come straight from an interview (e.g. the student
 	// confirming attendance) rather than from a reschedule or an agreement.
 	InterviewScheduleID *uint  `gorm:"index" json:"interview_schedule_id"`

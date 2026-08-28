@@ -196,7 +196,7 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		requestedBy = "employer"
 	}
 	reschedule := &models.RescheduleInterview{
-		InterviewScheduleID: interview.ID,
+		InterviewScheduleID: interview.InterviewID,
 		RescheduleReason:    payload.Reason,
 		RequestedBy:         requestedBy,
 		Status:              "pending",
@@ -294,7 +294,7 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 	if payload.Comment != "" {
 		message += " (" + payload.Comment + ")"
 	}
-	notifyAboutInterview(h.db, student.UserID, "ผลการพิจารณาสัมภาษณ์", "interview_result", message, interview.ID)
+	notifyAboutInterview(h.db, student.UserID, "ผลการพิจารณาสัมภาษณ์", "interview_result", message, interview.InterviewID)
 
 	utils.JSONSuccess(c, http.StatusOK, gin.H{"sent": true, "result": payload.Result})
 }
@@ -320,7 +320,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		return
 	}
 	var interview models.InterviewSchedule
-	if err := h.db.Where("id = ? AND student_id = ?", id, student.UserID).First(&interview).Error; err != nil {
+	if err := h.db.Where("interview_id = ? AND student_id = ?", id, student.UserID).First(&interview).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
 		return
 	}
@@ -342,7 +342,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 	if err := h.db.First(&employer, interview.EmployerID).Error; err == nil {
 		notifyAboutInterview(h.db, employer.UserID, "นักศึกษายืนยันเข้ารับสัมภาษณ์", "interview_confirmed",
 			fmt.Sprintf("%s ยืนยันนัดสัมภาษณ์วันที่ %s เวลา %s น. แล้ว", h.studentName(student.UserID), appointmentDate, interview.AppointmentTime),
-			interview.ID)
+			interview.InterviewID)
 	}
 
 	utils.JSONSuccess(c, http.StatusOK, gin.H{"confirmed": true})
@@ -410,7 +410,7 @@ func (h *InterviewController) mapToResponse(iv *models.InterviewSchedule, compan
 		reschedules = append(reschedules, mapRescheduleToResponse(&iv.Reschedules[i]))
 	}
 	return dto.InterviewResponse{
-		ID:                 iv.ID,
+		ID:                 iv.InterviewID,
 		StudentID:          iv.StudentID,
 		StudentName:        studentName,
 		EmployerID:         iv.EmployerID,
@@ -438,7 +438,7 @@ func mapRescheduleToResponse(r *models.RescheduleInterview) dto.RescheduleRespon
 		newAppointment = r.NewAppointmentDateTime.Format(time.RFC3339)
 	}
 	return dto.RescheduleResponse{
-		ID:                       r.ID,
+		ID:                       r.RescheduleID,
 		StudentAvailableDateTime: studentAvailable,
 		NewAppointmentDateTime:   newAppointment,
 		RescheduleReason:         r.RescheduleReason,

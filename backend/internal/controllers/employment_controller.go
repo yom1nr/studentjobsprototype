@@ -139,7 +139,7 @@ func (h *EmploymentController) Accept(c *gin.Context) {
 	}
 
 	notifyUser(h.db, employer.UserID, "นักศึกษาตอบรับข้อตกลงการจ้างงาน", "employment_agreement",
-		fmt.Sprintf("ข้อตกลง AG-%d เปลี่ยนสถานะเป็น \"มีผลบังคับ\"", agreement.ID))
+		fmt.Sprintf("ข้อตกลง AG-%d เปลี่ยนสถานะเป็น \"มีผลบังคับ\"", agreement.AgreementID))
 
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(agreement, employer.CompanyName, h.studentName(agreement.StudentID)))
 }
@@ -173,7 +173,7 @@ func (h *EmploymentController) Reject(c *gin.Context) {
 	}
 
 	notifyUser(h.db, employer.UserID, "นักศึกษาปฏิเสธข้อตกลงการจ้างงาน", "employment_agreement",
-		fmt.Sprintf("ข้อตกลง AG-%d ถูกปฏิเสธ: %s", agreement.ID, payload.Reason))
+		fmt.Sprintf("ข้อตกลง AG-%d ถูกปฏิเสธ: %s", agreement.AgreementID, payload.Reason))
 
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(agreement, employer.CompanyName, h.studentName(agreement.StudentID)))
 }
@@ -214,7 +214,7 @@ func (h *EmploymentController) ownedByCurrentStudent(c *gin.Context) (*models.Em
 		return nil, nil, false
 	}
 	var agreement models.EmploymentAgreement
-	if err := h.db.Where("id = ? AND student_id = ?", id, student.UserID).First(&agreement).Error; err != nil {
+	if err := h.db.Where("agreement_id = ? AND student_id = ?", id, student.UserID).First(&agreement).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "agreement not found", "no agreement exists with the given id")
 		return nil, nil, false
 	}
@@ -247,7 +247,7 @@ func (h *EmploymentController) mapToResponse(a *models.EmploymentAgreement, comp
 		startDate = a.StartDate.Format("2006-01-02")
 	}
 	return dto.AgreementResponse{
-		ID:              a.ID,
+		ID:              a.AgreementID,
 		StudentID:       a.StudentID,
 		StudentName:     studentName,
 		EmployerID:      a.EmployerID,

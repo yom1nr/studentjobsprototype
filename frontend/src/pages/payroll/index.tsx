@@ -465,11 +465,21 @@ function EmployerPayrollView() {
   useEffect(() => {
     if (!token || tab !== 'report') return
     let cancelled = false
-    setSummaryLoading(true)
-    getMonthlyPayrollSummary(token, reportMonth)
-      .then((s) => { if (!cancelled) setSummary(s) })
-      .catch((err) => { if (!cancelled) setError(apiErrorMessage(err, 'โหลดรายงานไม่สำเร็จ')) })
-      .finally(() => { if (!cancelled) setSummaryLoading(false) })
+    // Loading is flipped inside load() rather than in the effect body: setting
+    // state straight from an effect triggers an extra render pass, which is what
+    // react-hooks/set-state-in-effect flags. Same shape as every other page here.
+    async function load() {
+      setSummaryLoading(true)
+      try {
+        const s = await getMonthlyPayrollSummary(token!, reportMonth)
+        if (!cancelled) setSummary(s)
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'โหลดรายงานไม่สำเร็จ'))
+      } finally {
+        if (!cancelled) setSummaryLoading(false)
+      }
+    }
+    void load()
     return () => { cancelled = true }
   }, [token, tab, reportMonth])
 

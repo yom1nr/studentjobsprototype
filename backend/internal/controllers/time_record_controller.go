@@ -107,9 +107,10 @@ func (h *TimeRecordController) ListMyTimeRecords(c *gin.Context) {
 		return
 	}
 
+	p := utils.ParsePagination(c)
 	var records []models.TimeRecord
-	if err := h.db.Preload("EditRequest").Where("student_id = ?", student.UserID).Order("check_in_time DESC").Find(&records).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load time records", err.Error())
+	if err := h.db.Scopes(utils.Paginate(p)).Preload("EditRequest").Where("student_id = ?", student.UserID).Order("check_in_time DESC").Find(&records).Error; err != nil {
+		utils.JSONInternalError(c, "failed to load time records", err)
 		return
 	}
 
@@ -129,16 +130,17 @@ func (h *TimeRecordController) ListEmployerTimeRecords(c *gin.Context) {
 		return
 	}
 
+	p := utils.ParsePagination(c)
 	studentIDs := h.acceptedStudentIDs(employer.UserID)
 	var records []models.TimeRecord
-	query := h.db.Preload("EditRequest").Order("check_in_time DESC")
+	query := h.db.Scopes(utils.Paginate(p)).Preload("EditRequest").Order("check_in_time DESC")
 	if len(studentIDs) > 0 {
 		query = query.Where("student_id IN ?", studentIDs)
 	} else {
 		query = query.Where("1 = 0")
 	}
 	if err := query.Find(&records).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load time records", err.Error())
+		utils.JSONInternalError(c, "failed to load time records", err)
 		return
 	}
 
@@ -221,16 +223,30 @@ func (h *TimeRecordController) ListEmployerEditRequests(c *gin.Context) {
 		return
 	}
 
+	p := utils.ParsePagination(c)
 	var requests []models.TimeEditRequest
-	if err := h.db.Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&requests).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load edit requests", err.Error())
+	if err := h.db.Scopes(utils.Paginate(p)).Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&requests).Error; err != nil {
+		utils.JSONInternalError(c, "failed to load edit requests", err)
 		return
+	}
+
+	// Batch-load the referenced time records instead of one query per request.
+	recordIDs := make([]uint, 0, len(requests))
+	for i := range requests {
+		recordIDs = append(recordIDs, requests[i].RecordID)
+	}
+	recordByID := make(map[uint]models.TimeRecord, len(recordIDs))
+	if len(recordIDs) > 0 {
+		var recs []models.TimeRecord
+		h.db.Where("record_id IN ?", recordIDs).Find(&recs)
+		for _, r := range recs {
+			recordByID[r.RecordID] = r
+		}
 	}
 
 	responses := make([]dto.TimeEditRequestResponse, 0, len(requests))
 	for i := range requests {
-		var record models.TimeRecord
-		h.db.First(&record, requests[i].RecordID)
+		record := recordByID[requests[i].RecordID]
 		responses = append(responses, mapTimeEditRequestToResponse(&requests[i], h.studentName(record.StudentID), &record))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
@@ -256,16 +272,18 @@ func (h *TimeRecordController) ApproveEditRequest(c *gin.Context) {
 		utils.JSONError(c, http.StatusNotFound, "time record not found", "no time record exists with the given id")
 		return
 	}
-	record.CheckInTime = editRequest.NewCheckInTime
-	record.CheckOutTime = editRequest.NewCheckOutTime
-	if err := h.db.Save(&record).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "approve failed", err.Error())
-		return
-	}
 
-	editRequest.RequestStatus = "approved"
-	if err := h.db.Save(editRequest).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "approve failed", err.Error())
+	// Applying the new times and marking the request approved must be atomic.
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		record.CheckInTime = editRequest.NewCheckInTime
+		record.CheckOutTime = editRequest.NewCheckOutTime
+		if err := tx.Save(&record).Error; err != nil {
+			return err
+		}
+		editRequest.RequestStatus = "approved"
+		return tx.Save(editRequest).Error
+	}); err != nil {
+		utils.JSONInternalError(c, "approve failed", err)
 		return
 	}
 

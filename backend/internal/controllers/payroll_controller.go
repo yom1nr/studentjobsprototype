@@ -80,17 +80,20 @@ func (h *PayrollController) CreatePayroll(c *gin.Context) {
 		NetPayAmount:   netPay,
 		PaymentStatus:  "pending",
 	}
-	if err := h.db.Create(payroll).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
-		return
-	}
 	payslip := &models.Payslip{
-		PayrollID:          payroll.PayrollID,
 		StudentID:          agreement.StudentID,
 		IsStudentConfirmed: false,
 	}
-	if err := h.db.Create(payslip).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+
+	// The payroll cycle and its draft payslip are created together or not at all.
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(payroll).Error; err != nil {
+			return err
+		}
+		payslip.PayrollID = payroll.PayrollID
+		return tx.Create(payslip).Error
+	}); err != nil {
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 	payroll.Payslip = payslip
@@ -113,14 +116,18 @@ func (h *PayrollController) ApprovePayroll(c *gin.Context) {
 		return
 	}
 
-	payroll.PaymentStatus = "paid"
-	if err := h.db.Save(payroll).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "approve failed", err.Error())
+	now := time.Now().UTC()
+	// Marking the cycle paid and stamping the payslip transfer time are one unit.
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		payroll.PaymentStatus = "paid"
+		if err := tx.Save(payroll).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.Payslip{}).Where("payroll_id = ?", payroll.PayrollID).Update("transfer_date_time", &now).Error
+	}); err != nil {
+		utils.JSONInternalError(c, "approve failed", err)
 		return
 	}
-
-	now := time.Now().UTC()
-	h.db.Model(&models.Payslip{}).Where("payroll_id = ?", payroll.PayrollID).Update("transfer_date_time", &now)
 
 	var agreement models.EmploymentAgreement
 	h.db.First(&agreement, payroll.AgreementID)
@@ -143,6 +150,7 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 	}
 
 	role, _ := utils.GetUserRoleFromContext(c)
+	p := utils.ParsePagination(c)
 	var payrolls []models.Payroll
 
 	if role == "employer" {
@@ -150,11 +158,11 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := h.db.Preload("Payslip").
+		if err := h.db.Scopes(utils.Paginate(p)).Preload("Payslip").
 			Joins("JOIN employment_agreements ON employment_agreements.id = payrolls.agreement_id").
 			Where("employment_agreements.employer_id = ?", employer.UserID).
 			Order("payrolls.created_at DESC").Find(&payrolls).Error; err != nil {
-			utils.JSONError(c, http.StatusInternalServerError, "failed to load payrolls", err.Error())
+			utils.JSONInternalError(c, "failed to load payrolls", err)
 			return
 		}
 		responses := make([]dto.PayrollResponse, 0, len(payrolls))
@@ -172,9 +180,9 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
-	if err := h.db.Preload("Payslip").Joins("JOIN payslips ON payslips.payroll_id = payrolls.payroll_id").
+	if err := h.db.Scopes(utils.Paginate(p)).Preload("Payslip").Joins("JOIN payslips ON payslips.payroll_id = payrolls.payroll_id").
 		Where("payslips.student_id = ?", student.UserID).Order("payrolls.created_at DESC").Find(&payrolls).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load payrolls", err.Error())
+		utils.JSONInternalError(c, "failed to load payrolls", err)
 		return
 	}
 	responses := make([]dto.PayrollResponse, 0, len(payrolls))

@@ -12,6 +12,7 @@ import PersonIcon from '@mui/icons-material/Person'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
 import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined'
+import FavoriteIcon from '@mui/icons-material/Favorite'
 import { Link as RouterLink } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
@@ -753,6 +754,7 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
 const STUDENT_TABS = [
   { key: 'info', label: 'ข้อมูลส่วนตัว' },
   { key: 'documents', label: 'เอกสารของฉัน' },
+  { key: 'favorites', label: 'งานที่บันทึกไว้ (💖)' },
   { key: 'account', label: 'การจัดการบัญชี' },
 ] as const
 
@@ -1062,7 +1064,13 @@ function StudentSettingsView() {
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>
-            {activeTab === 'info' ? (editing ? 'แก้ไขข้อมูลส่วนตัว' : 'ข้อมูลส่วนตัวนักศึกษา') : activeTab === 'documents' ? 'เอกสารของฉัน' : 'การจัดการบัญชีนักศึกษา'}
+            {activeTab === 'info'
+              ? (editing ? 'แก้ไขข้อมูลส่วนตัว' : 'ข้อมูลส่วนตัวนักศึกษา')
+              : activeTab === 'documents'
+              ? 'เอกสารของฉัน'
+              : activeTab === 'favorites'
+              ? 'งานพาร์ทไทม์ที่บันทึกไว้ (💖)'
+              : 'การจัดการบัญชีนักศึกษา'}
           </Typography>
           {activeTab === 'info' &&
             (editing ? (
@@ -1288,6 +1296,25 @@ function StudentSettingsView() {
                 <Typography sx={{ color: '#697077', textAlign: 'center', py: 3 }}>ยังไม่มีเอกสารที่อัปโหลด</Typography>
               )}
             </Box>
+          </Box>
+        )}
+
+        {activeTab === 'favorites' && (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <FavoriteIcon sx={{ fontSize: 64, color: '#E53935', mb: 2 }} />
+            <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy, mb: 1 }}>
+              รายการงานพาร์ทไทม์ที่บันทึกไว้ 💖
+            </Typography>
+            <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>
+              คุณสามารถกดบันทึกหรือดูรายการงานที่เซฟไว้ได้จากหน้าค้นหางานพาร์ทไทม์
+            </Typography>
+            <Button
+              variant="contained"
+              onClick={() => navigate('/jobs')}
+              sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, px: 4, height: 44, fontWeight: 600 }}
+            >
+              ไปที่หน้าค้นหางานพาร์ทไทม์
+            </Button>
           </Box>
         )}
 

@@ -31,6 +31,8 @@ import RemoveIcon from '@mui/icons-material/Remove'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import MyLocationOutlinedIcon from '@mui/icons-material/MyLocationOutlined'
 import NearMeOutlinedIcon from '@mui/icons-material/NearMeOutlined'
+import FavoriteIcon from '@mui/icons-material/Favorite'
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
@@ -321,7 +323,8 @@ function JobDetailDialog({
 function StudentJobSearchView() {
   usePageTitle('ค้นหางานพาร์ทไทม์')
   const navigate = useNavigate()
-  const { token } = useAuth()
+  const { user, token } = useAuth()
+  const storageKey = user?.id ? `favorite_jobs_${user.id}` : 'favorite_jobs_guest'
 
   const [jobs, setJobs] = useState<Jobpost[]>([])
   const [loading, setLoading] = useState(true)
@@ -338,12 +341,42 @@ function StudentJobSearchView() {
   const [gpsLoading, setGpsLoading] = useState(false)
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null)
 
+  const [favoriteJobIds, setFavoriteJobIds] = useState<number[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      setFavoriteJobIds(saved ? JSON.parse(saved) : [])
+    } catch {
+      setFavoriteJobIds([])
+    }
+  }, [storageKey])
+
+  function toggleFavorite(e: React.MouseEvent, jobId: number) {
+    e.stopPropagation()
+    setFavoriteJobIds((prev) => {
+      const updated = prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(updated))
+      } catch {}
+      return updated
+    })
+  }
+
   const PAGE_SIZE = 8
   const [page, setPage] = useState(1)
 
   useEffect(() => {
     setPage(1)
-  }, [query, filters, gpsEnabled])
+  }, [query, filters, gpsEnabled, showOnlyFavorites])
 
   useEffect(() => {
     if (!token) return
@@ -406,6 +439,7 @@ function StudentJobSearchView() {
     const maxDist = filters.maxDistanceKm !== 'ไม่จำกัด' ? Number(filters.maxDistanceKm) : Number.POSITIVE_INFINITY
 
     const list = jobs.filter((job) => {
+      if (showOnlyFavorites && !favoriteJobIds.includes(job.id)) return false
       if (q && !job.position.toLowerCase().includes(q) && !job.company_name.toLowerCase().includes(q)) return false
       if (filters.jobType !== 'ทั้งหมด' && job.job_type !== filters.jobType) return false
       if (filters.location !== 'ทั้งหมด' && !job.location.includes(filters.location)) return false
@@ -470,6 +504,23 @@ function StudentJobSearchView() {
           slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchOutlinedIcon /></InputAdornment> } }}
         />
         <Button
+          variant={showOnlyFavorites ? 'contained' : 'outlined'}
+          startIcon={showOnlyFavorites ? <FavoriteIcon /> : <FavoriteBorderIcon />}
+          onClick={() => setShowOnlyFavorites((v) => !v)}
+          sx={{
+            borderRadius: '20px',
+            textTransform: 'none',
+            bgcolor: showOnlyFavorites ? '#E53935' : 'transparent',
+            color: showOnlyFavorites ? '#fff' : '#E53935',
+            borderColor: '#E53935',
+            px: 2.5,
+            flexShrink: 0,
+            '&:hover': { bgcolor: showOnlyFavorites ? '#C62828' : 'rgba(229, 57, 53, 0.08)' },
+          }}
+        >
+          {`งานที่สนใจ (${favoriteJobIds.length})`}
+        </Button>
+        <Button
           variant={gpsEnabled ? 'contained' : 'outlined'}
           startIcon={<MyLocationOutlinedIcon />}
           onClick={handleToggleGps}
@@ -515,6 +566,7 @@ function StudentJobSearchView() {
           {paginatedJobs.map((job) => {
             const jobCoords = getJobCoordinates(job.location)
             const distance = userCoords ? calculateDistanceKm(userCoords.lat, userCoords.lng, jobCoords.lat, jobCoords.lng) : null
+            const isFav = favoriteJobIds.includes(job.id)
 
             return (
               <Box
@@ -526,6 +578,7 @@ function StudentJobSearchView() {
                   p: 2.5,
                   display: 'flex',
                   gap: 2,
+                  position: 'relative',
                   cursor: 'pointer',
                   '&:hover': { boxShadow: '0px 4px 16px rgba(0,0,0,0.08)' },
                 }}
@@ -543,7 +596,19 @@ function StudentJobSearchView() {
                   <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.wage} บาท/ชั่วโมง</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-end' }}>
-                  {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px', fontSize: 13 }} />}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px', fontSize: 13 }} />}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => toggleFavorite(e, job.id)}
+                      sx={{
+                        color: isFav ? '#E53935' : '#9E9E9E',
+                        '&:hover': { bgcolor: 'rgba(229, 57, 53, 0.08)' },
+                      }}
+                    >
+                      {isFav ? <FavoriteIcon fontSize="small" /> : <FavoriteBorderIcon fontSize="small" />}
+                    </IconButton>
+                  </Box>
                   {distance !== null && (
                     <Chip
                       icon={<NearMeOutlinedIcon fontSize="small" />}

@@ -6,7 +6,9 @@ type RegisterRequest struct {
 	Password string `json:"password" validate:"required,min=8,max=72"`
 	Phone    string `json:"phone" validate:"omitempty,max=20"`
 	Gender   string `json:"gender" validate:"omitempty,max=20"`
-	Role     string `json:"role" validate:"omitempty,oneof=student employer admin"`
+	// admin accounts are provisioned by the seeder/migration only — never
+	// self-assignable through public registration.
+	Role     string `json:"role" validate:"omitempty,oneof=student employer"`
 }
 
 type LoginRequest struct {

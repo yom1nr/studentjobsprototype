@@ -22,10 +22,10 @@ import { useAuth } from '../../auth/useAuth'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { ApiError } from '../../services/https'
 import { listMyTimeRecords, createEditRequest } from '../../services/https/time-records'
-import { approvePayroll, confirmPayrollReceipt, createPayroll, listMyPayrolls } from '../../services/https/payrolls'
+import { approvePayroll, confirmPayrollReceipt, createPayroll, getMonthlyPayrollSummary, listMyPayrolls } from '../../services/https/payrolls'
 import { listMyAgreements } from '../../services/https/agreements'
 import type { TimeRecordEntry } from '../../interface/ITimeTrackingInterface'
-import type { PayrollRecord } from '../../interface/IPayrollInterface'
+import type { PayrollRecord, PayrollSummary } from '../../interface/IPayrollInterface'
 import type { AgreementRecord } from '../../interface/IInterviewInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6', ok: '#217829' }
@@ -428,6 +428,10 @@ function EmployerPayrollView() {
   const [cycleStart, setCycleStart] = useState('')
   const [cycleEnd, setCycleEnd] = useState('')
 
+  const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [summary, setSummary] = useState<PayrollSummary | null>(null)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -457,6 +461,17 @@ function EmployerPayrollView() {
       setError(apiErrorMessage(err, 'โหลดข้อมูลไม่สำเร็จ'))
     }
   }
+
+  useEffect(() => {
+    if (!token || tab !== 'report') return
+    let cancelled = false
+    setSummaryLoading(true)
+    getMonthlyPayrollSummary(token, reportMonth)
+      .then((s) => { if (!cancelled) setSummary(s) })
+      .catch((err) => { if (!cancelled) setError(apiErrorMessage(err, 'โหลดรายงานไม่สำเร็จ')) })
+      .finally(() => { if (!cancelled) setSummaryLoading(false) })
+    return () => { cancelled = true }
+  }, [token, tab, reportMonth])
 
   const totalPending = payrolls.filter((p) => p.payment_status === 'pending').reduce((sum, p) => sum + p.net_pay_amount, 0)
   const totalPaid = payrolls.filter((p) => p.payment_status === 'paid').reduce((sum, p) => sum + p.net_pay_amount, 0)
@@ -605,24 +620,62 @@ function EmployerPayrollView() {
       )}
 
       {!loading && tab === 'report' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {filteredPayrolls.map((p) => (
-            <Box key={p.id} sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>{p.student_name} — {formatDate(p.cycle_start_date)} ถึง {formatDate(p.cycle_end_date)}</Typography>
-              <Typography sx={{ fontSize: 13, color: '#0F62FE', mb: 2 }}>{p.total_hours.toFixed(2)} ชั่วโมงรวม</Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>รายงานสรุปยอดจ่ายค่าจ้างประจำเดือน</Typography>
+            <TextField
+              type="month"
+              size="small"
+              value={reportMonth}
+              onChange={(e) => setReportMonth(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '20px' } }}
+            />
+          </Box>
+
+          {summaryLoading && <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>กำลังโหลด...</Typography>}
+
+          {!summaryLoading && summary && (
+            <>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                <Box sx={{ bgcolor: '#EFF6FF', borderRadius: 2, px: 2, py: 1 }}>
-                  <Typography sx={{ fontSize: 12, color: '#0F62FE' }}>ยอดรวมทั้งหมด</Typography>
-                  <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>฿{currency.format(p.net_pay_amount)}</Typography>
-                </Box>
-                <Box sx={{ bgcolor: p.payment_status === 'paid' ? '#EAF7EA' : '#FFF0DD', borderRadius: 2, px: 2, py: 1 }}>
-                  <Typography sx={{ fontSize: 12, color: p.payment_status === 'paid' ? '#217829' : '#B5850C' }}>{p.payment_status === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย'}</Typography>
-                  <Typography sx={{ fontWeight: 700, fontSize: 18, color: p.payment_status === 'paid' ? '#217829' : '#B5850C' }}>฿{currency.format(p.net_pay_amount)}</Typography>
-                </Box>
+                {([
+                  ['ยอดรวมทั้งเดือน', `฿${currency.format(summary.total_amount)}`, colors.navy, '#F7F9FC'],
+                  ['จ่ายแล้ว', `฿${currency.format(summary.paid_amount)}`, '#217829', '#EAF7EA'],
+                  ['รอจ่าย', `฿${currency.format(summary.pending_amount)}`, '#B5850C', '#FFF0DD'],
+                  ['รอบจ่าย / ยืนยันรับแล้ว', `${summary.total_cycles} / ${summary.confirmed_count}`, '#0F62FE', '#EFF6FF'],
+                ] as const).map(([label, value, color, bg]) => (
+                  <Box key={label} sx={{ flex: 1, minWidth: 180, bgcolor: bg, borderRadius: 3, p: 2.5 }}>
+                    <Typography sx={{ fontSize: 13, color }}>{label}</Typography>
+                    <Typography sx={{ fontSize: 24, fontWeight: 700, color }}>{value}</Typography>
+                  </Box>
+                ))}
               </Box>
-            </Box>
-          ))}
-          {filteredPayrolls.length === 0 && <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>ไม่มีข้อมูล</Typography>}
+              <Typography sx={{ fontSize: 13, color: '#697077' }}>รวม {summary.total_hours.toFixed(2)} ชั่วโมงทำงานในเดือนนี้</Typography>
+
+              <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 0.8fr 1fr 1fr 1fr', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
+                  {['ชื่อ-นามสกุล', 'รอบ', 'ชั่วโมง', 'ยอดรวม', 'จ่ายแล้ว', 'รอจ่าย'].map((h) => (
+                    <Typography key={h} sx={{ fontSize: 12, fontWeight: 700, color: '#697077' }}>{h}</Typography>
+                  ))}
+                </Box>
+                {summary.by_student
+                  .filter((row) => row.student_name.toLowerCase().includes(search.toLowerCase()))
+                  .map((row, index) => (
+                    <Box key={row.student_id} sx={{ display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 0.8fr 1fr 1fr 1fr', alignItems: 'center', px: 2.5, py: 1.75, borderTop: index > 0 ? `1px solid ${colors.border}` : 'none' }}>
+                      <Typography sx={{ fontSize: 14, fontWeight: 600, color: colors.navy }}>{row.student_name || `#${row.student_id}`}</Typography>
+                      <Typography sx={{ fontSize: 14 }}>{row.cycles}</Typography>
+                      <Typography sx={{ fontSize: 14 }}>{row.total_hours.toFixed(2)}</Typography>
+                      <Typography sx={{ fontSize: 14, fontWeight: 600 }}>฿{currency.format(row.total_amount)}</Typography>
+                      <Typography sx={{ fontSize: 14, color: '#217829' }}>฿{currency.format(row.paid_amount)}</Typography>
+                      <Typography sx={{ fontSize: 14, color: '#B5850C' }}>฿{currency.format(row.pending_amount)}</Typography>
+                    </Box>
+                  ))}
+                {summary.by_student.length === 0 && (
+                  <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>ไม่มีรอบจ่ายในเดือนนี้</Typography>
+                )}
+              </Box>
+            </>
+          )}
         </Box>
       )}
 

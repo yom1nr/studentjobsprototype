@@ -20,7 +20,8 @@ type UpdateUserRequest struct {
 	Password        string `json:"password" validate:"omitempty,min=8,max=72"`
 	Phone           string `json:"phone" validate:"omitempty,max=20"`
 	Gender          string `json:"gender" validate:"omitempty,max=20"`
-	Role            string `json:"role" validate:"omitempty,oneof=student employer admin"`
+	// Role is intentionally NOT editable here — a user must not be able to
+	// change their own role via self-service profile update.
 }
 
 // keep time imported in case other DTOs in this file need it later

@@ -181,18 +181,26 @@ func (h *ApplicationController) ReviewApplication(c *gin.Context) {
         Comment:       payload.Comment,
         CheckedAt:     time.Now().UTC(),
     }
-    if err := h.db.Create(audit).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "review failed", err.Error())
-        return
-    }
 
-    // "correction_requested" is feedback only — the application stays pending.
-    if payload.ResultStatus == "accepted" || payload.ResultStatus == "rejected" {
-        application.Status = payload.ResultStatus
-        if err := h.db.Save(application).Error; err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "review failed", err.Error())
-            return
+    // Writing the audit row and flipping Application.Status must be atomic —
+    // otherwise a failure between them leaves an audit entry with no matching
+    // status change (or vice-versa). This is the pattern for every handler
+    // that touches more than one row.
+    if err := h.db.Transaction(func(tx *gorm.DB) error {
+        if err := tx.Create(audit).Error; err != nil {
+            return err
         }
+        // "correction_requested" is feedback only — the application stays pending.
+        if payload.ResultStatus == "accepted" || payload.ResultStatus == "rejected" {
+            application.Status = payload.ResultStatus
+            if err := tx.Save(application).Error; err != nil {
+                return err
+            }
+        }
+        return nil
+    }); err != nil {
+        utils.JSONInternalError(c, "review failed", err)
+        return
     }
 
     var student models.Student

@@ -24,7 +24,9 @@ func SetupRouter(
     complaintHandler *controllers.ComplaintController,
 ) *gin.Engine {
     router := gin.New()
-    router.Use(gin.Logger())
+    // Recovery must be registered here (before any routes) so it actually wraps
+    // the handler chain — adding it after SetupRouter returns is a no-op.
+    router.Use(gin.Logger(), gin.Recovery())
     router.Use(middleware.CORSMiddleware())
 
     // Public Routes
@@ -39,8 +41,9 @@ func SetupRouter(
     users.GET("/profile", userHandler.GetProfile)
     users.PUT("/profile", userHandler.UpdateProfile)
     users.DELETE("/profile", userHandler.DeleteUser)
-    users.GET("", userHandler.GetAllUsers)
-    users.GET("/:id", userHandler.GetUserByID)
+    // Enumerating / reading arbitrary user accounts is an admin-only capability.
+    users.GET("", middleware.RequireRole("admin"), userHandler.GetAllUsers)
+    users.GET("/:id", middleware.RequireRole("admin"), userHandler.GetUserByID)
 
     // Employer's own company profile (submits/edits, triggers admin review)
     employer := api.Group("/employer")
@@ -113,6 +116,7 @@ func SetupRouter(
     // Employer: payroll calculation + payment (B6729875 subsystem 2)
     employer.POST("/payrolls", payrollHandler.CreatePayroll)
     employer.POST("/payrolls/:id/approve", payrollHandler.ApprovePayroll)
+    employer.GET("/payrolls/summary", payrollHandler.MonthlySummary)
 
     // Student: confirm payment receipt
     student.POST("/payrolls/:id/confirm", payrollHandler.ConfirmReceipt)

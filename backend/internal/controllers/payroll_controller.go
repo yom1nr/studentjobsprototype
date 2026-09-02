@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -159,7 +160,7 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 			return
 		}
 		if err := h.db.Scopes(utils.Paginate(p)).Preload("Payslip").
-			Joins("JOIN employment_agreements ON employment_agreements.id = payrolls.agreement_id").
+			Joins("JOIN employment_agreements ON employment_agreements.agreement_id = payrolls.agreement_id").
 			Where("employment_agreements.employer_id = ?", employer.UserID).
 			Order("payrolls.created_at DESC").Find(&payrolls).Error; err != nil {
 			utils.JSONInternalError(c, "failed to load payrolls", err)
@@ -192,6 +193,92 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 		responses = append(responses, h.mapToResponse(&payrolls[i], h.companyName(agreement.EmployerID), h.studentName(student.UserID)))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
+}
+
+// MonthlySummary returns the current employer's pay-disbursement report for one
+// month (?month=YYYY-MM, defaults to the current month): payroll cycles whose
+// cycle-start falls in that month, totalled overall and broken down per student.
+// FR8 / U6.
+func (h *PayrollController) MonthlySummary(c *gin.Context) {
+	employer, ok := h.currentEmployer(c)
+	if !ok {
+		return
+	}
+
+	monthStr := c.Query("month")
+	if monthStr == "" {
+		monthStr = time.Now().UTC().Format("2006-01")
+	}
+	monthStart, err := time.Parse("2006-01", monthStr)
+	if err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "invalid month", "expected format YYYY-MM")
+		return
+	}
+	monthEnd := monthStart.AddDate(0, 1, 0)
+
+	var payrolls []models.Payroll
+	if err := h.db.Preload("Payslip").
+		Joins("JOIN employment_agreements ON employment_agreements.agreement_id = payrolls.agreement_id").
+		Where("employment_agreements.employer_id = ? AND payrolls.cycle_start_date >= ? AND payrolls.cycle_start_date < ?",
+			employer.UserID, monthStart, monthEnd).
+		Find(&payrolls).Error; err != nil {
+		utils.JSONInternalError(c, "failed to load payroll summary", err)
+		return
+	}
+
+	// agreement -> studentID, one query rather than one per row
+	agreementIDs := make([]uint, 0, len(payrolls))
+	for i := range payrolls {
+		agreementIDs = append(agreementIDs, payrolls[i].AgreementID)
+	}
+	studentByAgreement := make(map[uint]uint, len(agreementIDs))
+	if len(agreementIDs) > 0 {
+		var agrs []models.EmploymentAgreement
+		h.db.Where("agreement_id IN ?", agreementIDs).Find(&agrs)
+		for _, a := range agrs {
+			studentByAgreement[a.AgreementID] = a.StudentID
+		}
+	}
+
+	resp := dto.PayrollSummaryResponse{Month: monthStr}
+	rows := make(map[uint]*dto.PayrollSummaryStudentRow)
+	for i := range payrolls {
+		pr := payrolls[i]
+		sid := studentByAgreement[pr.AgreementID]
+		row := rows[sid]
+		if row == nil {
+			row = &dto.PayrollSummaryStudentRow{StudentID: sid, StudentName: h.studentName(sid)}
+			rows[sid] = row
+		}
+		row.Cycles++
+		row.TotalHours += pr.TotalHours
+		row.TotalAmount += pr.NetPayAmount
+		resp.TotalCycles++
+		resp.TotalHours += pr.TotalHours
+		resp.TotalAmount += pr.NetPayAmount
+
+		switch pr.PaymentStatus {
+		case "paid":
+			row.PaidAmount += pr.NetPayAmount
+			resp.PaidAmount += pr.NetPayAmount
+		case "pending":
+			row.PendingAmount += pr.NetPayAmount
+			resp.PendingAmount += pr.NetPayAmount
+		}
+		if pr.Payslip != nil && pr.Payslip.IsStudentConfirmed {
+			resp.ConfirmedCount++
+		}
+	}
+
+	resp.ByStudent = make([]dto.PayrollSummaryStudentRow, 0, len(rows))
+	for _, r := range rows {
+		resp.ByStudent = append(resp.ByStudent, *r)
+	}
+	sort.Slice(resp.ByStudent, func(i, j int) bool {
+		return resp.ByStudent[i].TotalAmount > resp.ByStudent[j].TotalAmount
+	})
+
+	utils.JSONSuccess(c, http.StatusOK, resp)
 }
 
 // ConfirmReceipt lets the student confirm they received the transferred pay.
@@ -269,7 +356,7 @@ func (h *PayrollController) ownedByEmployer(c *gin.Context, employerID uint) (*m
 	}
 	var payroll models.Payroll
 	if err := h.db.Preload("Payslip").
-		Joins("JOIN employment_agreements ON employment_agreements.id = payrolls.agreement_id").
+		Joins("JOIN employment_agreements ON employment_agreements.agreement_id = payrolls.agreement_id").
 		Where("payrolls.payroll_id = ? AND employment_agreements.employer_id = ?", id, employerID).
 		First(&payroll).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "payroll not found", "no payroll cycle exists with the given id")

@@ -114,6 +114,7 @@ func SetupRouter(
     // Employer: payroll calculation + payment (B6729875 subsystem 2)
     employer.POST("/payrolls", payrollHandler.CreatePayroll)
     employer.POST("/payrolls/:id/approve", payrollHandler.ApprovePayroll)
+    employer.GET("/payrolls/summary", payrollHandler.MonthlySummary)
 
     // Student: confirm payment receipt
     student.POST("/payrolls/:id/confirm", payrollHandler.ConfirmReceipt)

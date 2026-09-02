@@ -1,6 +1,6 @@
 import type { ApiEnvelope } from '../../interface/IApiInterface'
 
-const DEFAULT_BASE_URL = ''
+const DEFAULT_BASE_URL = 'http://127.0.0.1:8088'
 
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_BASE_URL as string | undefined

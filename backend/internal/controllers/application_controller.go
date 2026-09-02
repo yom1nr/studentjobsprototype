@@ -95,7 +95,7 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
     }
 
     var applications []models.Application
-    if err := h.db.Preload("Jobpost").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&applications).Error; err != nil {
+    if err := h.db.Preload("Jobpost").Where("student_id = ?", student.UserID).Order("apply_date DESC, application_id DESC").Find(&applications).Error; err != nil {
         utils.JSONError(c, http.StatusInternalServerError, "failed to load applications", err.Error())
         return
     }

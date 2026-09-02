@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, Chip, Dialog, IconButton, MenuItem, TextField, Typography } from '@mui/material'
+import { Alert, Avatar, Box, Button, Chip, Dialog, IconButton, MenuItem, TextField, Typography } from '@mui/material'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import CheckOutlinedIcon from '@mui/icons-material/CheckOutlined'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
@@ -11,6 +11,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import PersonIcon from '@mui/icons-material/Person'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
+import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import { Link as RouterLink } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
@@ -18,8 +19,8 @@ import { useAuth } from '../../auth/useAuth'
 import { ApiError } from '../../services/https'
 import { getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/https/employer'
 import type { EmployerProfile as EmployerProfileApi } from '../../interface/IEmployerInterface'
-import { getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
-import type { StudentProfile as StudentProfileApi } from '../../interface/IStudentInterface'
+import { extractScheduleFromImage, getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
+import type { StudentProfile as StudentProfileApi, TimeSlot } from '../../interface/IStudentInterface'
 
 const colors = { navy: '#012150', border: '#D9D9D9', field: '#F0F0F0' }
 
@@ -29,6 +30,7 @@ type Profile = {
   firstName: string
   lastName: string
   gender: string
+  dateOfBirth: string
   age: string
   address: string
   university: string
@@ -37,12 +39,14 @@ type Profile = {
   year: string
   phone: string
   skills: string
+  availableTime: string
 }
 
 const EMPTY_PROFILE: Profile = {
   firstName: '',
   lastName: '',
   gender: '',
+  dateOfBirth: '',
   age: '',
   address: '',
   university: '',
@@ -51,13 +55,15 @@ const EMPTY_PROFILE: Profile = {
   year: '',
   phone: '',
   skills: '',
+  availableTime: '',
 }
 
 const fieldRows: { key: keyof Profile; label: string }[] = [
   { key: 'firstName', label: 'ชื่อ' },
   { key: 'lastName', label: 'นามสกุล' },
   { key: 'gender', label: 'เพศ' },
-  { key: 'age', label: 'อายุ' },
+  { key: 'dateOfBirth', label: 'วัน/เดือน/ปีเกิด' },
+  { key: 'age', label: 'อายุ (คำนวณจากวันเกิด)' },
   { key: 'address', label: 'ที่อยู่' },
   { key: 'university', label: 'มหาวิทยาลัย' },
   { key: 'faculty', label: 'คณะ' },
@@ -65,16 +71,38 @@ const fieldRows: { key: keyof Profile; label: string }[] = [
   { key: 'year', label: 'ชั้นปีที่ศึกษา' },
   { key: 'phone', label: 'เบอร์โทรศัพท์' },
   { key: 'skills', label: 'ทักษะความสามารถ' },
+  { key: 'availableTime', label: 'เวลาว่างจากการเรียน' },
 ]
 
-type Document = { id: number; name: string; uploadedAt: string }
+type Document = { id: number; name: string; uploadedAt: string; file?: File }
 
 const ALLOWED_UPLOAD_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp']
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = (err) => reject(err)
+  })
+}
+
+function createDummyTimetableFile(filename: string): File {
+  const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+  const byteCharacters = atob(pngBase64)
+  const byteNumbers = new Array(byteCharacters.length)
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i)
+  }
+  const byteArray = new Uint8Array(byteNumbers)
+  const blob = new Blob([byteArray], { type: 'image/png' })
+  return new File([blob], filename, { type: 'image/png' })
+}
+
 const INITIAL_DOCUMENTS: Document[] = [
-  { id: 1, name: 'Profile.jpg', uploadedAt: '20 พ.ค. 2569' },
-  { id: 2, name: 'TimeTable.jpg', uploadedAt: '20 พ.ค. 2569' },
+  { id: 1, name: 'TimeTable.jpg (ตารางเรียนจากตอนสมัคร)', uploadedAt: 'ตอนสมัครสมาชิก' },
+  { id: 2, name: 'Profile.jpg', uploadedAt: '20 พ.ค. 2569' },
   { id: 3, name: 'Transcript.pdf', uploadedAt: '20 พ.ค. 2569' },
   { id: 4, name: 'Resume.pdf', uploadedAt: '20 พ.ค. 2569' },
 ]
@@ -315,6 +343,33 @@ function EmployerSettingsView() {
     }
   }
 
+  const [avatarUploading, setAvatarUploading] = useState(false)
+
+  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setError('ขนาดไฟล์รูปภาพเกิน 5MB')
+      return
+    }
+    setError(null)
+    setAvatarUploading(true)
+    try {
+      const base64 = await fileToBase64(file)
+      await updateProfile({ avatar: base64 })
+      setAvatarName(file.name)
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setError('อัปโหลดรูปโปรไฟล์ไม่สำเร็จ')
+      }
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
   function uploadDocument(key: string, fileName: string) {
     setDocuments((docs) => docs.map((d) => (d.key === key ? { ...d, fileName } : d)))
   }
@@ -484,19 +539,19 @@ function EmployerSettingsView() {
           {activeTab === 'account' && (
             <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 4 }}>
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                <Box
+                <Avatar
+                  src={user?.avatar}
                   sx={{
                     width: 140,
                     height: 140,
-                    borderRadius: '50%',
                     bgcolor: colors.field,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    color: '#9AA0A6',
+                    fontSize: 54,
+                    fontWeight: 700,
                   }}
                 >
-                  <PersonIcon sx={{ fontSize: 72, color: '#9AA0A6' }} />
-                </Box>
+                  {user?.user_name ? user.user_name.charAt(0).toUpperCase() : '?'}
+                </Avatar>
                 <Box
                   component="label"
                   sx={{
@@ -513,22 +568,23 @@ function EmployerSettingsView() {
                   <input
                     type="file"
                     hidden
-                    accept=".jpg,.jpeg,.png"
-                    onChange={(e) => setAvatarName(e.target.files?.[0]?.name ?? null)}
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => void handleAvatarUpload(e)}
+                    disabled={avatarUploading}
                   />
                   <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Typography sx={{ fontWeight: 700, fontSize: 13, color: colors.navy }}>รูปโปรไฟล์</Typography>
                     <Typography sx={{ fontSize: 11, color: '#9AA0A6' }} noWrap>
-                      {avatarName ?? 'รองรับไฟล์ JPG, PNG (ขนาดไม่เกิน 5MB)'}
+                      {avatarUploading ? 'กำลังอัปโหลด...' : avatarName ?? 'รองรับไฟล์ JPG, PNG (ขนาดไม่เกิน 5MB)'}
                     </Typography>
                   </Box>
                 </Box>
               </Box>
 
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1, maxWidth: 380 }}>
-                <TextField label="ชื่อผู้ใช้" size="small" value={user.user_name} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-                <TextField label="อีเมล" size="small" value={user.email} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+                <TextField label="ชื่อผู้ใช้" size="small" value={user?.user_name ?? ''} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+                <TextField label="อีเมล" size="small" value={user?.email ?? ''} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
                 <Button
                   onClick={() => setPasswordOpen(true)}
                   endIcon={<ChevronRightIcon />}
@@ -658,21 +714,48 @@ function EmployerSettingsView() {
   )
 }
 
+function calculateLocalAge(dobStr: string): number {
+  if (!dobStr) return 0
+  const dob = new Date(dobStr)
+  if (isNaN(dob.getTime())) return 0
+  const today = new Date()
+  let age = today.getFullYear() - dob.getFullYear()
+  const m = today.getMonth() - dob.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+    age--
+  }
+  return age < 0 ? 0 : age
+}
+
 function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { userName: string; phone: string; gender: string }): Profile {
+  const rawDob = api?.date_of_birth ?? ''
+  const dob = rawDob ? rawDob.slice(0, 10) : ''
+  const calculatedAge = api?.age || (dob ? calculateLocalAge(dob) : 0)
+  const ageVal = calculatedAge > 0 ? `${calculatedAge} ปี` : ''
+
   return {
     firstName: api?.first_name ?? account.userName,
     lastName: api?.last_name ?? '',
     gender: account.gender,
-    age: '',
+    dateOfBirth: dob,
+    age: ageVal,
     address: api?.address ?? '',
     university: api?.university ?? '',
     faculty: api?.faculty ?? '',
     major: api?.major ?? '',
     year: api?.years ?? '',
-    phone: account.phone,
     skills: api?.skill ?? '',
+    availableTime: api?.available_time ?? '',
   }
 }
+
+const STUDENT_TABS = [
+  { key: 'info', label: 'ข้อมูลส่วนตัว' },
+  { key: 'documents', label: 'เอกสารของฉัน' },
+  { key: 'account', label: 'การจัดการบัญชี' },
+] as const
+
+type StudentTabKey = (typeof STUDENT_TABS)[number]['key']
 
 function StudentSettingsView() {
   usePageTitle('ข้อมูลส่วนตัวนักศึกษา')
@@ -692,6 +775,164 @@ function StudentSettingsView() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const [activeTab, setActiveTab] = useState<StudentTabKey>('info')
+  const [avatarName, setAvatarName] = useState<string | null>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+
+  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setError('ขนาดไฟล์รูปภาพเกิน 5MB')
+      return
+    }
+    setError(null)
+    setAvatarUploading(true)
+    try {
+      const base64 = await fileToBase64(file)
+      await updateProfile({ avatar: base64 })
+      setAvatarName(file.name)
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setError('อัปโหลดรูปโปรไฟล์ไม่สำเร็จ')
+      }
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const [selectedDocId, setSelectedDocId] = useState<string>('1')
+  const [aiExtractOpen, setAiExtractOpen] = useState(false)
+  const [aiExtractFile, setAiExtractFile] = useState<File | null>(() =>
+    INITIAL_DOCUMENTS[0] ? createDummyTimetableFile(INITIAL_DOCUMENTS[0].name) : null,
+  )
+  const [aiExtractLoading, setAiExtractLoading] = useState(false)
+  const [aiExtractError, setAiExtractError] = useState<string | null>(null)
+  const [aiExtractedClassSlots, setAiExtractedClassSlots] = useState<TimeSlot[] | null>(null)
+  const [aiExtractedFreeSlots, setAiExtractedFreeSlots] = useState<TimeSlot[] | null>(null)
+
+  function openAiExtraction(docId?: string) {
+    const targetId = docId || selectedDocId || (documents[0] ? String(documents[0].id) : 'upload_new')
+    setSelectedDocId(targetId)
+    if (targetId === 'upload_new') {
+      setAiExtractFile(null)
+    } else {
+      const foundDoc = documents.find((d) => String(d.id) === targetId)
+      if (foundDoc) {
+        setAiExtractFile(foundDoc.file || createDummyTimetableFile(foundDoc.name))
+      }
+    }
+    setAiExtractOpen(true)
+  }
+
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+
+  async function changePassword() {
+    setPasswordError(null)
+    if (currentPassword.length === 0) {
+      setPasswordError('กรุณากรอกรหัสผ่านปัจจุบัน')
+      return
+    }
+    if (newPassword.length < 8) {
+      setPasswordError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('รหัสผ่านไม่ตรงกัน')
+      return
+    }
+    setPasswordSaving(true)
+    try {
+      await updateProfile({ current_password: currentPassword, password: newPassword })
+      setPasswordOpen(false)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setPasswordError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setPasswordError('เปลี่ยนรหัสผ่านไม่สำเร็จ')
+      }
+    } finally {
+      setPasswordSaving(false)
+    }
+  }
+
+  async function handleRunAiExtraction() {
+    if (!token || !aiExtractFile) return
+    setAiExtractError(null)
+    setAiExtractLoading(true)
+    setAiExtractedClassSlots(null)
+    setAiExtractedFreeSlots(null)
+
+    try {
+      const res = await extractScheduleFromImage(token, aiExtractFile)
+      setAiExtractedClassSlots(res.class_slots || [])
+      setAiExtractedFreeSlots(res.free_slots || [])
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setAiExtractError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setAiExtractError('ไม่สามารถวิเคราะห์รูปภาพได้ กรุณาตรวจสอบไฟล์รูปภาพตารางเรียนหรือการตั้งค่า GEMINI_API_KEY')
+      }
+    } finally {
+      setAiExtractLoading(false)
+    }
+  }
+
+  async function applyExtractedScheduleToAvailableTime() {
+    if (!aiExtractedFreeSlots || !token) return
+    const freeSummary =
+      aiExtractedFreeSlots.length > 0
+        ? aiExtractedFreeSlots.map((s) => `${s.day} ${s.start_time}-${s.end_time}`).join(', ')
+        : 'ไม่มีเวลาว่าง'
+
+    try {
+      const updatedApi = await upsertMyStudentProfile(token, {
+        first_name: profile.firstName.trim() || (user?.user_name ?? ''),
+        last_name: profile.lastName.trim(),
+        date_of_birth: profile.dateOfBirth.trim() || undefined,
+        address: profile.address.trim() || undefined,
+        university: profile.university.trim() || undefined,
+        faculty: profile.faculty.trim() || undefined,
+        major: profile.major.trim() || undefined,
+        years: profile.year.trim() || undefined,
+        skill: profile.skills.trim() || undefined,
+        available_time: freeSummary,
+      })
+
+      const updatedLocal = apiToLocalStudentProfile(updatedApi, {
+        userName: user?.user_name ?? '',
+        phone: profile.phone,
+        gender: profile.gender,
+      })
+
+      setProfile(updatedLocal)
+      setDraft(updatedLocal)
+      setAiExtractOpen(false)
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setAiExtractError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setAiExtractError('ไม่สามารถบันทึกเวลาว่างลงฐานข้อมูลได้')
+      }
+    }
+  }
 
   useEffect(() => {
     if (!token) return
@@ -720,7 +961,10 @@ function StudentSettingsView() {
   }, [token, user?.user_name, user?.phone, user?.gender])
 
   function startEdit() {
-    setDraft(profile)
+    setDraft({
+      ...profile,
+      dateOfBirth: profile.dateOfBirth ? profile.dateOfBirth.slice(0, 10) : '',
+    })
     setError(null)
     setEditing(true)
   }
@@ -733,12 +977,14 @@ function StudentSettingsView() {
       const api = await upsertMyStudentProfile(token, {
         first_name: draft.firstName.trim(),
         last_name: draft.lastName.trim(),
+        date_of_birth: draft.dateOfBirth.trim() || undefined,
         address: draft.address.trim() || undefined,
         university: draft.university.trim() || undefined,
         faculty: draft.faculty.trim() || undefined,
         major: draft.major.trim() || undefined,
         years: draft.year.trim() || undefined,
         skill: draft.skills.trim() || undefined,
+        available_time: draft.availableTime.trim() || undefined,
       })
       if (draft.phone.trim() !== (user?.phone ?? '') || draft.gender.trim() !== (user?.gender ?? '')) {
         await updateProfile({ phone: draft.phone.trim() || undefined, gender: draft.gender.trim() || undefined })
@@ -792,10 +1038,13 @@ function StudentSettingsView() {
       setUploadError('กรุณาเลือกไฟล์ที่ต้องการอัปโหลด')
       return
     }
-    setDocuments((docs) => [
-      ...docs,
-      { id: docs.length ? Math.max(...docs.map((d) => d.id)) + 1 : 1, name: selectedFile.name, uploadedAt: new Date().toLocaleDateString('th-TH') },
-    ])
+    const newDoc: Document = {
+      id: documents.length ? Math.max(...documents.map((d) => d.id)) + 1 : 1,
+      name: selectedFile.name,
+      uploadedAt: new Date().toLocaleDateString('th-TH'),
+      file: selectedFile,
+    }
+    setDocuments((docs) => [...docs, newDoc])
     closeUploadDialog()
   }
 
@@ -810,117 +1059,404 @@ function StudentSettingsView() {
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>
-            {editing ? 'แก้ไขข้อมูลส่วนตัว' : 'ข้อมูลส่วนตัว'}
+            {activeTab === 'info' ? (editing ? 'แก้ไขข้อมูลส่วนตัว' : 'ข้อมูลส่วนตัวนักศึกษา') : activeTab === 'documents' ? 'เอกสารของฉัน' : 'การจัดการบัญชีนักศึกษา'}
           </Typography>
-          {editing ? (
-            <Box sx={{ display: 'flex', gap: 1 }}>
+          {activeTab === 'info' &&
+            (editing ? (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  startIcon={<CheckOutlinedIcon />}
+                  onClick={() => void saveProfile()}
+                  disabled={saving}
+                  sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  บันทึก
+                </Button>
+                <Button
+                  startIcon={<CloseOutlinedIcon />}
+                  onClick={() => setEditing(false)}
+                  sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  ยกเลิก
+                </Button>
+              </Box>
+            ) : (
               <Button
-                startIcon={<CheckOutlinedIcon />}
-                onClick={() => void saveProfile()}
-                disabled={saving}
-                sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                startIcon={<EditOutlinedIcon />}
+                onClick={startEdit}
+                sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
               >
-                บันทึก
+                แก้ไขข้อมูล
               </Button>
-              <Button
-                startIcon={<CloseOutlinedIcon />}
-                onClick={() => setEditing(false)}
-                sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
-              >
-                ยกเลิก
-              </Button>
-            </Box>
-          ) : (
-            <Button
-              startIcon={<EditOutlinedIcon />}
-              onClick={startEdit}
-              sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
-            >
-              แก้ไขข้อมูล
-            </Button>
-          )}
+            ))}
         </Box>
 
-        {editing ? (
-          <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3, alignItems: 'center' }}>
-            {fieldRows.map((row) =>
-              row.key === 'gender' ? (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 3 }}>
+          {STUDENT_TABS.map((tab) => (
+            <Button
+              key={tab.key}
+              onClick={() => {
+                setActiveTab(tab.key)
+                setEditing(false)
+              }}
+              variant={activeTab === tab.key ? 'contained' : 'outlined'}
+              sx={{
+                borderRadius: '20px',
+                textTransform: 'none',
+                px: 2.5,
+                bgcolor: activeTab === tab.key ? colors.navy : 'transparent',
+                borderColor: colors.border,
+                color: activeTab === tab.key ? '#fff' : colors.navy,
+                '&:hover': { bgcolor: activeTab === tab.key ? '#000226' : '#F7FAFF' },
+              }}
+            >
+              {tab.label}
+            </Button>
+          ))}
+        </Box>
+
+        {activeTab === 'info' &&
+          (editing ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3, alignItems: 'center' }}>
+              {fieldRows.map((row) => {
+                if (row.key === 'gender') {
+                  return (
+                    <Box key={row.key} sx={{ display: 'contents' }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                      <TextField
+                        select
+                        size="small"
+                        value={draft.gender}
+                        onChange={(e) => setDraft({ ...draft, gender: e.target.value })}
+                        sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
+                      >
+                        <MenuItem value="ชาย">ชาย</MenuItem>
+                        <MenuItem value="หญิง">หญิง</MenuItem>
+                        <MenuItem value="อื่น ๆ">อื่น ๆ</MenuItem>
+                      </TextField>
+                    </Box>
+                  )
+                }
+                if (row.key === 'dateOfBirth') {
+                  return (
+                    <Box key={row.key} sx={{ display: 'contents' }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={draft.dateOfBirth}
+                        onChange={(e) => setDraft({ ...draft, dateOfBirth: e.target.value })}
+                        sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                      />
+                    </Box>
+                  )
+                }
+                if (row.key === 'age') {
+                  return (
+                    <Box key={row.key} sx={{ display: 'contents' }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                      <Typography sx={{ fontSize: 15, color: '#555', fontStyle: 'italic' }}>
+                        {draft.dateOfBirth
+                          ? `${calculateLocalAge(draft.dateOfBirth)} ปี (คำนวณอัตโนมัติจากวันเกิด)`
+                          : 'เลือกวัน/เดือน/ปีเกิดเพื่อคำนวณอายุ'}
+                      </Typography>
+                    </Box>
+                  )
+                }
+                return (
+                  <Box key={row.key} sx={{ display: 'contents' }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                    <TextField
+                      size="small"
+                      value={draft[row.key]}
+                      onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
+                      multiline={row.key === 'skills' || row.key === 'availableTime'}
+                      sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: row.key === 'address' || row.key === 'skills' || row.key === 'availableTime' ? 480 : 320 }}
+                    />
+                  </Box>
+                )
+              })}
+            </Box>
+          ) : (
+            <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3 }}>
+              {fieldRows.map((row) => (
                 <Box key={row.key} sx={{ display: 'contents' }}>
                   <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
-                  <TextField
-                    select
-                    size="small"
-                    value={draft.gender}
-                    onChange={(e) => setDraft({ ...draft, gender: e.target.value })}
-                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
-                  >
-                    <MenuItem value="ชาย">ชาย</MenuItem>
-                    <MenuItem value="หญิง">หญิง</MenuItem>
-                    <MenuItem value="อื่น ๆ">อื่น ๆ</MenuItem>
-                  </TextField>
+                  <Typography sx={{ fontSize: 16, color: profile[row.key] ? '#000' : '#9AA0A6' }}>
+                    {profile[row.key] || 'ยังไม่ระบุ'}
+                  </Typography>
                 </Box>
-              ) : (
-                <Box key={row.key} sx={{ display: 'contents' }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
-                  <TextField
-                    size="small"
-                    value={draft[row.key]}
-                    onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
-                    multiline={row.key === 'skills'}
-                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: row.key === 'address' || row.key === 'skills' ? 480 : 320 }}
-                  />
-                </Box>
-              ),
-            )}
-          </Box>
-        ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3 }}>
-            {fieldRows.map((row) => (
-              <Box key={row.key} sx={{ display: 'contents' }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
-                <Typography sx={{ fontSize: 16, color: profile[row.key] ? '#000' : '#9AA0A6' }}>
-                  {profile[row.key] || 'ยังไม่ระบุ'}
-                </Typography>
+              ))}
+            </Box>
+          ))}
+
+        {activeTab === 'documents' && (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>รายการเอกสารในระบบ</Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  startIcon={<AutoAwesomeOutlinedIcon />}
+                  onClick={() => openAiExtraction()}
+                  sx={{ bgcolor: 'rgba(1, 33, 80, 0.08)', color: colors.navy, textTransform: 'none', borderRadius: '20px', px: 2, fontWeight: 600 }}
+                >
+                  วิเคราะห์ตารางเรียน (AI)
+                </Button>
+                <Button
+                  startIcon={<UploadOutlinedIcon />}
+                  onClick={() => setUploadOpen(true)}
+                  sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  อัปโหลด
+                </Button>
               </Box>
-            ))}
+            </Box>
+
+            <Box>
+              {documents.map((doc, index) => (
+                <Box key={doc.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2, borderTop: index > 0 ? '1px solid #E8E8E8' : 'none' }}>
+                  <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
+                  <Box sx={{ flex: 1 }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{doc.name}</Typography>
+                    <Typography sx={{ fontSize: 14, color: '#000' }}>อัปโหลดเมื่อ {doc.uploadedAt}</Typography>
+                  </Box>
+
+                  <Button
+                    onClick={() => removeDocument(doc.id)}
+                    sx={{ bgcolor: '#FF564A', color: '#fff', textTransform: 'none', borderRadius: '20px', minWidth: 60, px: 1.5, fontSize: 13 }}
+                  >
+                    ลบ
+                  </Button>
+                </Box>
+              ))}
+
+              {documents.length === 0 && (
+                <Typography sx={{ color: '#697077', textAlign: 'center', py: 3 }}>ยังไม่มีเอกสารที่อัปโหลด</Typography>
+              )}
+            </Box>
+          </Box>
+        )}
+
+        {activeTab === 'account' && (
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 4 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+              <Avatar
+                src={user?.avatar}
+                sx={{
+                  width: 140,
+                  height: 140,
+                  bgcolor: colors.field,
+                  color: '#9AA0A6',
+                  fontSize: 54,
+                  fontWeight: 700,
+                }}
+              >
+                {user?.user_name ? user.user_name.charAt(0).toUpperCase() : '?'}
+              </Avatar>
+              <Box
+                component="label"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  border: `1.5px solid ${colors.border}`,
+                  borderRadius: 3,
+                  p: 1.5,
+                  cursor: 'pointer',
+                  width: 260,
+                }}
+              >
+                <input
+                  type="file"
+                  hidden
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => void handleAvatarUpload(e)}
+                  disabled={avatarUploading}
+                />
+                <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 13, color: colors.navy }}>รูปโปรไฟล์</Typography>
+                  <Typography sx={{ fontSize: 11, color: '#9AA0A6' }} noWrap>
+                    {avatarUploading ? 'กำลังอัปโหลด...' : avatarName ?? 'รองรับไฟล์ JPG, PNG (ขนาดไม่เกิน 5MB)'}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1, maxWidth: 380 }}>
+              <TextField label="ชื่อผู้ใช้" size="small" value={user?.user_name ?? ''} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+              <TextField label="อีเมล" size="small" value={user?.email ?? ''} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+              <TextField label="เบอร์โทรศัพท์" size="small" value={profile.phone || 'ยังไม่ระบุ'} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+              <TextField label="เพศ" size="small" value={profile.gender || 'ยังไม่ระบุ'} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+              <Button
+                onClick={() => setPasswordOpen(true)}
+                endIcon={<ChevronRightIcon />}
+                sx={{
+                  justifyContent: 'space-between',
+                  bgcolor: colors.field,
+                  color: colors.navy,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  borderRadius: 2,
+                  px: 2,
+                  py: 1.25,
+                  '&:hover': { bgcolor: '#E4E4E4' },
+                }}
+              >
+                เปลี่ยนรหัสผ่าน
+              </Button>
+            </Box>
           </Box>
         )}
       </Box>
 
-      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>เอกสารที่อัปโหลด</Typography>
-          <Button
-            startIcon={<UploadOutlinedIcon />}
-            onClick={() => setUploadOpen(true)}
-            sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
-          >
-            อัปโหลด
-          </Button>
-        </Box>
 
-        <Box>
-          {documents.map((doc, index) => (
-            <Box key={doc.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2, borderTop: index > 0 ? '1px solid #E8E8E8' : 'none' }}>
-              <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
-              <Box sx={{ flex: 1 }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{doc.name}</Typography>
-                <Typography sx={{ fontSize: 14, color: '#000' }}>อัปโหลดเมื่อ {doc.uploadedAt}</Typography>
-              </Box>
+      {/* AI Schedule Extraction Dialog */}
+      <Dialog open={aiExtractOpen} onClose={() => setAiExtractOpen(false)} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AutoAwesomeOutlinedIcon sx={{ color: colors.navy }} />
+              <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>วิเคราะห์ตารางเรียนด้วย AI</Typography>
+            </Box>
+            <IconButton size="small" onClick={() => setAiExtractOpen(false)}><CloseOutlinedIcon /></IconButton>
+          </Box>
+
+          <ErrorAlert message={aiExtractError} />
+
+          <Typography sx={{ fontSize: 14, color: '#555', mb: 2 }}>
+            เลือกระบุภาพตารางเรียนที่มีในระบบ (เช่น ตารางเรียนที่อัปโหลดตอนสมัครสมาชิก) หรือเลือกอัปโหลดไฟล์ภาพใหม่ เพื่อให้ AI สกัดช่วงเวลาที่มีเรียนและคำนวณเวลาว่างอัตโนมัติ
+          </Typography>
+
+          <Box sx={{ mb: 2 }}>
+            <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.75 }}>
+              เอกสารตารางเรียนที่ต้องการวิเคราะห์:
+            </Typography>
+            <TextField
+              select
+              fullWidth
+              size="small"
+              value={selectedDocId}
+              onChange={(e) => {
+                const val = e.target.value
+                setSelectedDocId(val)
+                if (val === 'upload_new') {
+                  setAiExtractFile(null)
+                } else {
+                  const foundDoc = documents.find((d) => String(d.id) === val)
+                  if (foundDoc) {
+                    setAiExtractFile(foundDoc.file || createDummyTimetableFile(foundDoc.name))
+                  }
+                }
+              }}
+              sx={{ bgcolor: '#F9FAFB', borderRadius: 1 }}
+            >
+              {documents.map((doc) => (
+                <MenuItem key={doc.id} value={String(doc.id)}>
+                  📄 {doc.name} ({doc.uploadedAt})
+                </MenuItem>
+              ))}
+              <MenuItem value="upload_new">➕ อัปโหลดภาพตารางเรียนใหม่...</MenuItem>
+            </TextField>
+          </Box>
+
+          {selectedDocId === 'upload_new' && (
+            <Box
+              component="label"
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: '#F5F7FA',
+                border: `2px dashed ${colors.navy}`,
+                borderRadius: 3,
+                height: 120,
+                cursor: 'pointer',
+                mb: 2,
+                p: 2,
+                textAlign: 'center',
+              }}
+            >
+              <input
+                type="file"
+                hidden
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) setAiExtractFile(file)
+                }}
+              />
+              <AddIcon sx={{ color: colors.navy, fontSize: 32, mb: 1 }} />
+              <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>
+                {aiExtractFile ? aiExtractFile.name : 'คลิกเลือกภาพตารางเรียนใบใหม่'}
+              </Typography>
+            </Box>
+          )}
+
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={() => void handleRunAiExtraction()}
+            disabled={!aiExtractFile || aiExtractLoading}
+            sx={{ height: 44, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, mb: 3 }}
+          >
+            {aiExtractLoading ? 'กำลังวิเคราะห์รูปภาพ…' : 'เริ่มสกัดตารางเรียนด้วย AI'}
+          </Button>
+
+          {(aiExtractedClassSlots || aiExtractedFreeSlots) && (
+            <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2, bgcolor: '#FAFAFA' }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 1 }}>
+                1. เวลาเรียนที่สกัดได้จาก AI ({aiExtractedClassSlots?.length ?? 0} ช่วงเวลา):
+              </Typography>
+              {aiExtractedClassSlots && aiExtractedClassSlots.length > 0 ? (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                  {aiExtractedClassSlots.map((slot, i) => (
+                    <Chip
+                      key={`class-${slot.day}-${slot.start_time}-${i}`}
+                      label={`${slot.day}: ${slot.start_time} - ${slot.end_time}`}
+                      color="secondary"
+                      size="small"
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              ) : (
+                <Typography sx={{ fontSize: 13, color: '#697077', mb: 2 }}>ไม่พบช่วงเวลาเรียนในภาพ</Typography>
+              )}
+
+              <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#2E7D32', mb: 1 }}>
+                2. เวลาว่างจากการเรียนที่คำนวณได้ (08:00 - 20:00 น.):
+              </Typography>
+              {aiExtractedFreeSlots && aiExtractedFreeSlots.length > 0 ? (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2.5 }}>
+                  {aiExtractedFreeSlots.map((slot, i) => (
+                    <Chip
+                      key={`free-${slot.day}-${slot.start_time}-${i}`}
+                      label={`${slot.day}: ${slot.start_time} - ${slot.end_time}`}
+                      color="success"
+                      size="small"
+                    />
+                  ))}
+                </Box>
+              ) : (
+                <Typography sx={{ fontSize: 13, color: '#697077', mb: 2 }}>ไม่มีเวลาว่างจากการเรียน</Typography>
+              )}
+
               <Button
-                onClick={() => removeDocument(doc.id)}
-                sx={{ bgcolor: '#FF564A', color: '#fff', textTransform: 'none', borderRadius: '20px', minWidth: 60, px: 1.5, fontSize: 13 }}
+                fullWidth
+                variant="contained"
+                color="success"
+                onClick={() => void applyExtractedScheduleToAvailableTime()}
+                sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600 }}
               >
-                ลบ
+                นำช่วงเวลาว่างไปบันทึกในโปรไฟล์ (เวลาว่างจากการเรียน)
               </Button>
             </Box>
-          ))}
-
-          {documents.length === 0 && (
-            <Typography sx={{ color: '#697077', textAlign: 'center', py: 3 }}>ยังไม่มีเอกสารที่อัปโหลด</Typography>
           )}
         </Box>
-      </Box>
+      </Dialog>
 
       {/* Upload dialog */}
       <Dialog open={uploadOpen} onClose={closeUploadDialog} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
@@ -977,6 +1513,98 @@ function StudentSettingsView() {
             sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
           >
             อัปโหลด
+          </Button>
+        </Box>
+      </Dialog>
+
+      {/* Change password dialog */}
+      <Dialog open={passwordOpen} onClose={() => setPasswordOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>เปลี่ยนแปลงรหัสผ่านของคุณ</Typography>
+              <Typography sx={{ fontSize: 13, color: '#697077', mt: 0.5 }}>
+                รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร ประกอบด้วยอักษรและตัวเลข
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={() => setPasswordOpen(false)}>
+              <CloseOutlinedIcon />
+            </IconButton>
+          </Box>
+
+          <ErrorAlert message={passwordError} />
+
+          <TextField
+            label="รหัสผ่านปัจจุบัน"
+            placeholder="กรุณากรอกรหัสผ่านปัจจุบัน"
+            type={showCurrentPassword ? 'text' : 'password'}
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowCurrentPassword((v) => !v)} edge="end">
+                    {showCurrentPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+          <TextField
+            label="รหัสผ่านใหม่"
+            placeholder="กรุณากรอกรหัสผ่านใหม่"
+            type={showNewPassword ? 'text' : 'password'}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowNewPassword((v) => !v)} edge="end">
+                    {showNewPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+          <TextField
+            label="ยืนยันรหัสผ่าน"
+            placeholder="กรุณากรอกรหัสผ่าน"
+            type={showConfirmPassword ? 'text' : 'password'}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 1 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowConfirmPassword((v) => !v)} edge="end">
+                    {showConfirmPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+
+          <Typography
+            component={RouterLink}
+            to="/forgot-password"
+            sx={{ fontSize: 13, color: '#045BE4', fontWeight: 600, textDecoration: 'none', display: 'inline-block', mb: 3 }}
+          >
+            ลืมรหัสผ่าน?
+          </Typography>
+
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={() => void changePassword()}
+            disabled={passwordSaving}
+            sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
+          >
+            {passwordSaving ? 'กำลังบันทึก…' : 'เปลี่ยนรหัสผ่าน'}
           </Button>
         </Box>
       </Dialog>

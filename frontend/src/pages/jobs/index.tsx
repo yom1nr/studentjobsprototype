@@ -36,7 +36,7 @@ import { useAuth } from '../../auth/useAuth'
 import { ApiError } from '../../services/https'
 import { closeJobpost, createJobpost, listMyJobposts, listOpenJobposts, updateJobpost } from '../../services/https/jobposts'
 import { createApplication } from '../../services/https/applications'
-import type { Jobpost, UpsertJobpostRequest } from '../../interface/IJobInterface'
+import MyLocationOutlinedIcon from '@mui/icons-material/MyLocationOutlined'
 
 const colors = { navy: '#012150', border: '#9E9E9E', tagBg: 'rgba(0, 136, 255, 0.1)', thumbBg: '#D9D9D9' }
 
@@ -49,9 +49,36 @@ type JobFilters = {
   location: string
   minWage: string
   maxWage: string
+  maxDistance: string // 'all' | '2' | '5' | '10'
 }
 
-const DEFAULT_JOB_FILTERS: JobFilters = { jobType: 'ทั้งหมด', location: 'ทั้งหมด', minWage: '0', maxWage: '50000' }
+const DEFAULT_JOB_FILTERS: JobFilters = {
+  jobType: 'ทั้งหมด',
+  location: 'ทั้งหมด',
+  minWage: '0',
+  maxWage: '50000',
+  maxDistance: 'all',
+}
+
+function getJobCoordinates(location?: string): { lat: number; lng: number } {
+  const loc = (location || '').toLowerCase()
+  if (loc.includes('ประตู1') || loc.includes('ประตู 1')) return { lat: 14.885, lng: 102.015 }
+  if (loc.includes('สิรินธร') || loc.includes('เทคโนโลยีสังคม')) return { lat: 14.879, lng: 102.022 }
+  if (loc.includes('ประตู4') || loc.includes('ประตู 4')) return { lat: 14.872, lng: 102.011 }
+  if (loc.includes('ประตู5') || loc.includes('ประตู 5')) return { lat: 14.869, lng: 102.028 }
+  return { lat: 14.8817, lng: 102.0207 } // SUT Main Campus
+}
+
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371 // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return Math.round(R * c * 10) / 10
+}
 
 function FilterDialog({
   open,
@@ -99,6 +126,21 @@ function FilterDialog({
           <TextField size="small" value={draft.maxWage} onChange={(e) => setDraft({ ...draft, maxWage: e.target.value })} fullWidth />
           <Typography sx={{ whiteSpace: 'nowrap', fontSize: 14 }}>บาท</Typography>
         </Box>
+
+        <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.5 }}>รัศมีใกล้เคียง GPS (ระยะทาง)</Typography>
+        <TextField
+          select
+          fullWidth
+          size="small"
+          value={draft.maxDistance}
+          onChange={(e) => setDraft({ ...draft, maxDistance: e.target.value })}
+          sx={{ mb: 2 }}
+        >
+          <MenuItem value="all">ไม่จำกัดระยะทาง (ทั้งหมด)</MenuItem>
+          <MenuItem value="2">ภายใน 2 กิโลเมตร</MenuItem>
+          <MenuItem value="5">ภายใน 5 กิโลเมตร</MenuItem>
+          <MenuItem value="10">ภายใน 10 กิโลเมตร</MenuItem>
+        </TextField>
 
         <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.5 }}>เวลาทำงาน</Typography>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 1, mb: 3 }}>
@@ -253,6 +295,40 @@ function StudentJobSearchView() {
   const [outcome, setOutcome] = useState<'success' | 'fail' | null>(null)
   const [outcomeMessage, setOutcomeMessage] = useState<string | null>(null)
 
+  // GPS Nearby Jobs state
+  const [gpsEnabled, setGpsEnabled] = useState(false)
+  const [gpsLoading, setGpsLoading] = useState(false)
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null)
+
+  function toggleGps() {
+    if (gpsEnabled) {
+      setGpsEnabled(false)
+      setUserCoords(null)
+      return
+    }
+    setGpsLoading(true)
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+          setGpsEnabled(true)
+          setGpsLoading(false)
+        },
+        () => {
+          // Fallback to SUT Main Campus GPS location
+          setUserCoords({ lat: 14.8817, lng: 102.0207 })
+          setGpsEnabled(true)
+          setGpsLoading(false)
+        },
+        { timeout: 5000 },
+      )
+    } else {
+      setUserCoords({ lat: 14.8817, lng: 102.0207 })
+      setGpsEnabled(true)
+      setGpsLoading(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -280,15 +356,47 @@ function StudentJobSearchView() {
     const q = query.trim().toLowerCase()
     const minWage = Number(filters.minWage) || 0
     const maxWage = Number(filters.maxWage) || Number.POSITIVE_INFINITY
+    const maxDist = filters.maxDistance !== 'all' ? Number(filters.maxDistance) : Number.POSITIVE_INFINITY
 
-    return jobs.filter((job) => {
+    const list = jobs.filter((job) => {
       if (q && !job.position.toLowerCase().includes(q) && !job.company_name.toLowerCase().includes(q)) return false
       if (filters.jobType !== 'ทั้งหมด' && job.job_type !== filters.jobType) return false
       if (filters.location !== 'ทั้งหมด' && job.location !== filters.location) return false
       if (job.wage < minWage || job.wage > maxWage) return false
+
+      if (gpsEnabled && userCoords) {
+        const jobCoords = getJobCoordinates(job.location)
+        const dist = calculateDistanceKm(userCoords.lat, userCoords.lng, jobCoords.lat, jobCoords.lng)
+        if (dist > maxDist) return false
+      }
+
       return true
     })
-  }, [jobs, query, filters])
+
+    if (gpsEnabled && userCoords) {
+      return [...list].sort((a, b) => {
+        const coordA = getJobCoordinates(a.location)
+        const coordB = getJobCoordinates(b.location)
+        const distA = calculateDistanceKm(userCoords.lat, userCoords.lng, coordA.lat, coordA.lng)
+        const distB = calculateDistanceKm(userCoords.lat, userCoords.lng, coordB.lat, coordB.lng)
+        return distA - distB
+      })
+    }
+
+    return list
+  }, [jobs, query, filters, gpsEnabled, userCoords])
+
+  const PAGE_SIZE = 8
+  const totalPages = Math.ceil(filteredJobs.length / PAGE_SIZE) || 1
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, filters, gpsEnabled])
+
+  const paginatedJobs = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE
+    return filteredJobs.slice(start, start + PAGE_SIZE)
+  }, [filteredJobs, page])
 
   async function apply() {
     if (!selectedJob) return
@@ -313,15 +421,33 @@ function StudentJobSearchView() {
     <Box sx={{ maxWidth: 950, mx: 'auto' }}>
       <ErrorAlert message={error} />
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 4 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
         <TextField
-          placeholder="พนักงานเสิร์ฟ"
+          placeholder="ค้นหาตำแหน่งงาน เช่น พนักงานเสิร์ฟ บาริสต้า"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           fullWidth
-          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '20px', bgcolor: 'rgba(158, 158, 158, 0.1)' } }}
+          sx={{ flex: 1, minWidth: 240, '& .MuiOutlinedInput-root': { borderRadius: '20px', bgcolor: 'rgba(158, 158, 158, 0.1)' } }}
           slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchOutlinedIcon /></InputAdornment> } }}
         />
+        <Button
+          variant={gpsEnabled ? 'contained' : 'outlined'}
+          startIcon={<MyLocationOutlinedIcon />}
+          onClick={toggleGps}
+          disabled={gpsLoading}
+          sx={{
+            borderRadius: '20px',
+            textTransform: 'none',
+            bgcolor: gpsEnabled ? colors.navy : 'transparent',
+            borderColor: colors.navy,
+            color: gpsEnabled ? '#fff' : colors.navy,
+            px: 2.5,
+            flexShrink: 0,
+            '&:hover': { bgcolor: gpsEnabled ? '#000226' : '#F7FAFF' },
+          }}
+        >
+          {gpsLoading ? 'กำลังระบุ GPS…' : gpsEnabled ? 'ปิด GPS' : '📍 ค้นหางานใกล้ฉัน (GPS)'}
+        </Button>
         <Button
           variant="outlined"
           startIcon={<TuneOutlinedIcon />}
@@ -330,55 +456,76 @@ function StudentJobSearchView() {
         >
           ตัวกรอง
         </Button>
-        <Button
-          variant="contained"
-          sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: '#0088FF', px: 4, flexShrink: 0, '&:hover': { bgcolor: '#0070D6' } }}
-        >
-          ค้นหา
-        </Button>
       </Box>
 
+      {gpsEnabled && userCoords && (
+        <Box sx={{ mb: 3 }}>
+          <Chip
+            icon={<MyLocationOutlinedIcon fontSize="small" />}
+            label={`ระบุตำแหน่ง GPS เรียบร้อย: (ละติจูด ${userCoords.lat.toFixed(4)}, ลองจิจูด ${userCoords.lng.toFixed(4)}) — จัดลำดับงานที่ใกล้ที่สุดขึ้นก่อน`}
+            color="info"
+            variant="outlined"
+            sx={{ fontWeight: 600, fontSize: 13 }}
+          />
+        </Box>
+      )}
+
       <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>
-        {query.trim().length === 0
+        {query.trim().length === 0 && !gpsEnabled
           ? 'แนะนำสำหรับคุณ'
-          : <>ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box></>}
+          : <>ผลการค้นหา {gpsEnabled ? '(เรียงจากงานที่ใกล้ที่สุด)' : ''} <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ (หน้า {page}/{totalPages})</Box></>}
       </Typography>
 
       {loading ? (
         <Alert severity="info">กำลังโหลดข้อมูล…</Alert>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          {filteredJobs.map((job) => (
-            <Box
-              key={job.id}
-              onClick={() => setSelectedJob(job)}
-              sx={{
-                border: `1px solid ${colors.border}`,
-                borderRadius: '20px',
-                p: 2.5,
-                display: 'flex',
-                gap: 2,
-                cursor: 'pointer',
-                '&:hover': { boxShadow: '0px 4px 16px rgba(0,0,0,0.08)' },
-              }}
-            >
-              <Box sx={{ width: 57, height: 57, borderRadius: '10px', bgcolor: colors.thumbBg, flexShrink: 0 }} />
-              <Box sx={{ flex: 1 }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>{job.position}</Typography>
-                <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.company_name}</Typography>
-                {job.location && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                    <RoomOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-                    <Typography sx={{ fontSize: 16, color: colors.navy }}>{job.location}</Typography>
-                  </Box>
-                )}
-                <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.wage} บาท/ชั่วโมง</Typography>
+          {paginatedJobs.map((job) => {
+            const jobCoords = getJobCoordinates(job.location)
+            const distance = userCoords ? calculateDistanceKm(userCoords.lat, userCoords.lng, jobCoords.lat, jobCoords.lng) : null
+
+            return (
+              <Box
+                key={job.id}
+                onClick={() => setSelectedJob(job)}
+                sx={{
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '20px',
+                  p: 2.5,
+                  display: 'flex',
+                  gap: 2,
+                  cursor: 'pointer',
+                  '&:hover': { boxShadow: '0px 4px 16px rgba(0,0,0,0.08)' },
+                }}
+              >
+                <Box sx={{ width: 57, height: 57, borderRadius: '10px', bgcolor: colors.thumbBg, flexShrink: 0 }} />
+                <Box sx={{ flex: 1 }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>{job.position}</Typography>
+                  <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.company_name}</Typography>
+                  {job.location && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                      <RoomOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
+                      <Typography sx={{ fontSize: 16, color: colors.navy }}>{job.location}</Typography>
+                    </Box>
+                  )}
+                  <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.wage} บาท/ชั่วโมง</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-end' }}>
+                  {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px', fontSize: 13 }} />}
+                  {distance !== null && (
+                    <Chip
+                      icon={<RoomOutlinedIcon fontSize="small" />}
+                      label={`ห่าง ${distance} กม.`}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                      sx={{ fontWeight: 600, fontSize: 12 }}
+                    />
+                  )}
+                </Box>
               </Box>
-              <Box sx={{ display: 'flex', gap: 1, alignSelf: 'flex-start' }}>
-                {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px', fontSize: 13 }} />}
-              </Box>
-            </Box>
-          ))}
+            )
+          })}
 
           {filteredJobs.length === 0 && (
             <Typography sx={{ color: '#697077', textAlign: 'center', py: 6 }}>ไม่พบตำแหน่งงานที่ค้นหา</Typography>
@@ -386,35 +533,47 @@ function StudentJobSearchView() {
         </Box>
       )}
 
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1, mt: 4 }}>
-        <Button disabled={page === 1} onClick={() => setPage((p) => p - 1)} sx={{ textTransform: 'none', color: '#9E9E9E' }}>
-          Previous
-        </Button>
-        {[1, 2, 3].map((n) => (
-          <Box
-            key={n}
-            onClick={() => setPage(n)}
-            sx={{
-              width: 28,
-              height: 28,
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: 'pointer',
-              bgcolor: page === n ? '#624DE3' : '#E0E0E0',
-              color: page === n ? '#FFFFFF' : '#000000',
-            }}
+      {totalPages > 1 && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1, mt: 4 }}>
+          <Button
+            disabled={page === 1}
+            onClick={() => setPage((p) => Math.max(p - 1, 1))}
+            sx={{ textTransform: 'none', color: page === 1 ? '#C4C4C4' : colors.navy, fontWeight: 600 }}
           >
-            {n}
-          </Box>
-        ))}
-        <Button onClick={() => setPage((p) => p + 1)} sx={{ textTransform: 'none', color: '#9E9E9E' }}>
-          Next
-        </Button>
-      </Box>
+            Previous
+          </Button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+            <Box
+              key={n}
+              onClick={() => setPage(n)}
+              sx={{
+                width: 32,
+                height: 32,
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                bgcolor: page === n ? colors.navy : '#E0E0E0',
+                color: page === n ? '#FFFFFF' : '#000000',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': { bgcolor: page === n ? colors.navy : '#D0D0D0' },
+              }}
+            >
+              {n}
+            </Box>
+          ))}
+          <Button
+            disabled={page === totalPages}
+            onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+            sx={{ textTransform: 'none', color: page === totalPages ? '#C4C4C4' : colors.navy, fontWeight: 600 }}
+          >
+            Next
+          </Button>
+        </Box>
+      )}
 
       <FilterDialog key={String(filterOpen)} open={filterOpen} onClose={() => setFilterOpen(false)} value={filters} onApply={setFilters} />
       <JobDetailDialog

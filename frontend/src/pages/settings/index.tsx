@@ -754,7 +754,7 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
 const STUDENT_TABS = [
   { key: 'info', label: 'ข้อมูลส่วนตัว' },
   { key: 'documents', label: 'เอกสารของฉัน' },
-  { key: 'favorites', label: 'งานที่บันทึกไว้ (💖)' },
+  { key: 'favorites', label: 'งานที่บันทึกไว้' },
   { key: 'account', label: 'การจัดการบัญชี' },
 ] as const
 
@@ -1069,7 +1069,7 @@ function StudentSettingsView() {
               : activeTab === 'documents'
               ? 'เอกสารของฉัน'
               : activeTab === 'favorites'
-              ? 'งานพาร์ทไทม์ที่บันทึกไว้ (💖)'
+              ? 'งานพาร์ทไทม์ที่บันทึกไว้'
               : 'การจัดการบัญชีนักศึกษา'}
           </Typography>
           {activeTab === 'info' &&
@@ -1303,7 +1303,7 @@ function StudentSettingsView() {
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <FavoriteIcon sx={{ fontSize: 64, color: '#E53935', mb: 2 }} />
             <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy, mb: 1 }}>
-              รายการงานพาร์ทไทม์ที่บันทึกไว้ 💖
+              รายการงานพาร์ทไทม์ที่บันทึกไว้
             </Typography>
             <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>
               คุณสามารถกดบันทึกหรือดูรายการงานที่เซฟไว้ได้จากหน้าค้นหางานพาร์ทไทม์

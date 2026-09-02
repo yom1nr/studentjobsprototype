@@ -464,7 +464,7 @@ function StudentJobSearchView() {
     }
 
     return list
-  }, [jobs, query, filters, gpsEnabled, userCoords])
+  }, [jobs, query, filters, gpsEnabled, userCoords, showOnlyFavorites, favoriteJobIds])
 
   const totalPages = Math.ceil(filteredJobs.length / PAGE_SIZE) || 1
   const paginatedJobs = useMemo(() => {

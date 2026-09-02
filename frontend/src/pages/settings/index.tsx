@@ -13,7 +13,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
 import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import FavoriteIcon from '@mui/icons-material/Favorite'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
@@ -22,6 +22,8 @@ import { getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/ht
 import type { EmployerProfile as EmployerProfileApi } from '../../interface/IEmployerInterface'
 import { extractScheduleFromImage, getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
 import type { StudentProfile as StudentProfileApi, TimeSlot } from '../../interface/IStudentInterface'
+import { listOpenJobposts } from '../../services/https/jobposts'
+import type { Jobpost } from '../../interface/IJobInterface'
 
 const colors = { navy: '#012150', border: '#D9D9D9', field: '#F0F0F0' }
 
@@ -762,7 +764,9 @@ type StudentTabKey = (typeof STUDENT_TABS)[number]['key']
 
 function StudentSettingsView() {
   usePageTitle('ข้อมูลส่วนตัวนักศึกษา')
+  const navigate = useNavigate()
   const { user, token, updateProfile } = useAuth()
+  const storageKey = user?.id ? `favorite_jobs_${user.id}` : 'favorite_jobs_guest'
 
   const [profile, setProfile] = useState<Profile>(() =>
     apiToLocalStudentProfile(null, { userName: user?.user_name ?? '', phone: user?.phone ?? '', gender: user?.gender ?? '' }),
@@ -782,6 +786,58 @@ function StudentSettingsView() {
   const [activeTab, setActiveTab] = useState<StudentTabKey>('info')
   const [avatarName, setAvatarName] = useState<string | null>(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
+
+  const [favoriteJobIds, setFavoriteJobIds] = useState<number[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const [savedJobs, setSavedJobs] = useState<Jobpost[]>([])
+  const [loadingSavedJobs, setLoadingSavedJobs] = useState(false)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      setFavoriteJobIds(saved ? JSON.parse(saved) : [])
+    } catch {
+      setFavoriteJobIds([])
+    }
+  }, [storageKey, activeTab])
+
+  useEffect(() => {
+    if (activeTab !== 'favorites' || !token) return
+    let cancelled = false
+    async function loadFavs() {
+      setLoadingSavedJobs(true)
+      try {
+        const allJobs = await listOpenJobposts(token!)
+        if (!cancelled) {
+          const favList = allJobs.filter((j) => favoriteJobIds.includes(j.id))
+          setSavedJobs(favList)
+        }
+      } catch {
+        if (!cancelled) setSavedJobs([])
+      } finally {
+        if (!cancelled) setLoadingSavedJobs(false)
+      }
+    }
+    void loadFavs()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, token, favoriteJobIds])
+
+  function removeFavorite(jobId: number) {
+    const updated = favoriteJobIds.filter((id) => id !== jobId)
+    setFavoriteJobIds(updated)
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated))
+    } catch {}
+    setSavedJobs((prev) => prev.filter((j) => j.id !== jobId))
+  }
 
   async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -1300,21 +1356,83 @@ function StudentSettingsView() {
         )}
 
         {activeTab === 'favorites' && (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <FavoriteIcon sx={{ fontSize: 64, color: '#E53935', mb: 2 }} />
-            <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy, mb: 1 }}>
-              รายการงานพาร์ทไทม์ที่บันทึกไว้
-            </Typography>
-            <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>
-              คุณสามารถกดบันทึกหรือดูรายการงานที่เซฟไว้ได้จากหน้าค้นหางานพาร์ทไทม์
-            </Typography>
-            <Button
-              variant="contained"
-              onClick={() => navigate('/jobs')}
-              sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, px: 4, height: 44, fontWeight: 600 }}
-            >
-              ไปที่หน้าค้นหางานพาร์ทไทม์
-            </Button>
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>
+                รายการงานพาร์ทไทม์ที่บันทึกไว้ ({savedJobs.length})
+              </Typography>
+              <Button
+                variant="outlined"
+                onClick={() => navigate('/jobs')}
+                sx={{ borderRadius: '20px', textTransform: 'none', color: colors.navy, borderColor: colors.border, px: 2.5 }}
+              >
+                ค้นหาตำแหน่งงานเพิ่ม
+              </Button>
+            </Box>
+
+            {loadingSavedJobs ? (
+              <Alert severity="info">กำลังโหลดรายการงานที่บันทึกไว้…</Alert>
+            ) : savedJobs.length > 0 ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {savedJobs.map((job) => (
+                  <Box
+                    key={job.id}
+                    onClick={() => navigate('/jobs')}
+                    sx={{
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '16px',
+                      p: 2.5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      cursor: 'pointer',
+                      '&:hover': { boxShadow: '0px 4px 16px rgba(0,0,0,0.08)' },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                      <Box sx={{ width: 50, height: 50, borderRadius: '10px', bgcolor: '#C4C4C4', flexShrink: 0 }} />
+                      <Box>
+                        <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>{job.position}</Typography>
+                        <Typography sx={{ fontSize: 14, color: colors.navy, mt: 0.25 }}>{job.company_name}</Typography>
+                        {job.location && (
+                          <Typography sx={{ fontSize: 13, color: '#666', mt: 0.25 }}>{job.location}</Typography>
+                        )}
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Chip label={`${job.wage} บาท/ชม.`} color="primary" variant="outlined" sx={{ fontWeight: 600 }} />
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeFavorite(job.id)
+                        }}
+                        sx={{ color: '#E53935', '&:hover': { bgcolor: 'rgba(229, 57, 53, 0.08)' } }}
+                      >
+                        <FavoriteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 5 }}>
+                <FavoriteIcon sx={{ fontSize: 64, color: '#CCCCCC', mb: 2 }} />
+                <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mb: 1 }}>
+                  ยังไม่มีงานพาร์ทไทม์ที่บันทึกไว้
+                </Typography>
+                <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>
+                  คุณสามารถกดบันทึกหัวใจบนประกาศงาน เพื่อเก็บไว้ดูย้อนหลังหรือยื่นสมัครได้ง่ายขึ้น
+                </Typography>
+                <Button
+                  variant="contained"
+                  onClick={() => navigate('/jobs')}
+                  sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, px: 4, height: 44, fontWeight: 600, '&:hover': { bgcolor: '#000226' } }}
+                >
+                  ไปที่หน้าค้นหางานพาร์ทไทม์
+                </Button>
+              </Box>
+            )}
           </Box>
         )}
 

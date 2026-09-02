@@ -14,12 +14,13 @@ function applyAuthResponse(res: AuthResponse): { token: string; user: User } {
 
 
 export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY))
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY))
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState<boolean>(true)
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_STORAGE_KEY)
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY)
     setToken(null)
     setUser(null)
   }, [])
@@ -30,10 +31,14 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     setUser(profile)
   }, [token])
 
-  const login = useCallback(async (payload: LoginRequest) => {
+  const login = useCallback(async (payload: LoginRequest, remember?: boolean) => {
     const res = await authApi.login(payload)
     const next = applyAuthResponse(res)
-    localStorage.setItem(TOKEN_STORAGE_KEY, next.token)
+    if (remember) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, next.token)
+    } else {
+      sessionStorage.setItem(TOKEN_STORAGE_KEY, next.token)
+    }
     setToken(next.token)
     setUser(next.user)
   }, [])

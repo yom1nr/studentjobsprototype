@@ -194,6 +194,26 @@ func (h *JobpostController) CloseJobpost(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, employer.CompanyName))
 }
 
+// DeleteJobpost permanently removes a job posting owned by the current employer.
+func (h *JobpostController) DeleteJobpost(c *gin.Context) {
+    employer, ok := h.currentEmployer(c)
+    if !ok {
+        return
+    }
+
+    jobpost, ok := h.ownedJobpost(c, employer.UserID)
+    if !ok {
+        return
+    }
+
+    if err := h.db.Delete(jobpost).Error; err != nil {
+        utils.JSONError(c, http.StatusInternalServerError, "delete failed", err.Error())
+        return
+    }
+
+    c.Status(http.StatusNoContent)
+}
+
 func (h *JobpostController) currentEmployer(c *gin.Context) (*models.Employer, bool) {
     userID, ok := utils.GetUserIDFromContext(c)
     if !ok {

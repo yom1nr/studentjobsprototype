@@ -33,7 +33,7 @@ func (h *EmployerController) GetMyProfile(c *gin.Context) {
         return
     }
 
-    employer, err := h.findByUserID(userID)
+    employer, attachment, err := h.findByUserID(userID)
     if err != nil {
         utils.JSONError(c, http.StatusBadRequest, "failed to load profile", err.Error())
         return
@@ -43,7 +43,7 @@ func (h *EmployerController) GetMyProfile(c *gin.Context) {
         return
     }
 
-    utils.JSONSuccess(c, http.StatusOK, mapEmployerToResponse(employer))
+    utils.JSONSuccess(c, http.StatusOK, mapEmployerToResponse(employer, attachment))
 }
 
 // UpsertMyProfile creates or updates the current employer's company profile.
@@ -66,7 +66,7 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
         return
     }
 
-    employer, err := h.findByUserID(userID)
+    employer, _, err := h.findByUserID(userID)
     if err != nil {
         utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
         return
@@ -75,7 +75,11 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
     var conflicting models.Employer
     conflictQuery := h.db.Where("tax_id = ?", payload.TaxID)
     if employer != nil {
+<<<<<<< Updated upstream
         conflictQuery = conflictQuery.Where("id != ?", employer.ID)
+=======
+        conflictQuery = conflictQuery.Where("user_id != ?", employer.UserID)
+>>>>>>> Stashed changes
     }
     if err := conflictQuery.First(&conflicting).Error; err == nil {
         utils.JSONError(c, http.StatusBadRequest, "update failed", "tax id already registered to another employer")
@@ -100,6 +104,14 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
     employer.Link = payload.Link
     employer.CompanyAddress = payload.CompanyAddress
 
+    if !isNew {
+        var existing models.Employer
+        if err := h.db.Where("tax_id = ? AND user_id != ?", payload.TaxID, employer.UserID).First(&existing).Error; err == nil {
+            utils.JSONError(c, http.StatusBadRequest, "Tax ID already in use", "Tax ID already in use")
+            return
+        }
+    }
+
     if isNew {
         if err := h.db.Create(employer).Error; err != nil {
             utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
@@ -122,25 +134,74 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
         }
     }
 
-    utils.JSONSuccess(c, http.StatusOK, mapEmployerToResponse(employer))
+    // Handle AttachmentEmployer
+    var attachment models.AttachmentEmployer
+    err = h.db.Where("user_id = ?", userID).First(&attachment).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            attachment = models.AttachmentEmployer{UserID: userID}
+        } else {
+            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            return
+        }
+    }
+
+    attachment.CompanyRegis = payload.CompanyRegis
+    attachment.Logo = payload.Logo
+    attachment.CardID = payload.CardID
+
+    if attachment.AttachmentEmployerID == 0 {
+        h.db.Create(&attachment)
+    } else {
+        h.db.Save(&attachment)
+    }
+
+    // If status was request_document, moving it back to pending might be desired,
+    // but the requirement says "later edits leave the existing approval status untouched" or we should change it to pending if they re-submitted?
+    // Let's change it back to pending if it was request_document.
+    if employer.Approve != nil && employer.Approve.Status == "request_document" {
+        employer.Approve.Status = "pending"
+        h.db.Save(employer.Approve)
+    }
+
+    if payload.ProfilePicture != "" {
+        if err := h.db.Model(&models.User{}).Where("user_id = ?", userID).Update("profile_picture", payload.ProfilePicture).Error; err != nil {
+            utils.JSONError(c, http.StatusInternalServerError, "failed to update profile picture", err.Error())
+            return
+        }
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, mapEmployerToResponse(employer, &attachment))
 }
 
-func (h *EmployerController) findByUserID(userID uint) (*models.Employer, error) {
+func (h *EmployerController) findByUserID(userID uint) (*models.Employer, *models.AttachmentEmployer, error) {
     var employer models.Employer
     err := h.db.Preload("Approve").Where("user_id = ?", userID).First(&employer).Error
     if err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
-            return nil, nil
+            return nil, nil, nil
         }
-        return nil, err
+        return nil, nil, err
     }
-    return &employer, nil
+    
+    var attachment models.AttachmentEmployer
+    h.db.Where("user_id = ?", userID).First(&attachment)
+    return &employer, &attachment, nil
 }
 
-func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileResponse {
+func mapEmployerToResponse(employer *models.Employer, attachment *models.AttachmentEmployer) *dto.EmployerProfileResponse {
     status := ""
     if employer.Approve != nil {
         status = employer.Approve.Status
+    }
+
+    companyRegis := ""
+    logo := ""
+    cardID := ""
+    if attachment != nil {
+        companyRegis = attachment.CompanyRegis
+        logo = attachment.Logo
+        cardID = attachment.CardID
     }
 
     return &dto.EmployerProfileResponse{
@@ -155,6 +216,9 @@ func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileRespon
         TaxID:          employer.TaxID,
         Link:           employer.Link,
         CompanyAddress: employer.CompanyAddress,
+        CompanyRegis:   companyRegis,
+        Logo:           logo,
+        CardID:         cardID,
         ApproveStatus:  status,
         CreatedAt:      employer.CreatedAt.Format(time.RFC3339),
         UpdatedAt:      employer.UpdatedAt.Format(time.RFC3339),

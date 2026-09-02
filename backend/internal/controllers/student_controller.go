@@ -33,7 +33,7 @@ func (h *StudentController) GetMyProfile(c *gin.Context) {
         return
     }
 
-    student, err := h.findByUserID(userID)
+    student, attachment, err := h.findByUserID(userID)
     if err != nil {
         utils.JSONError(c, http.StatusBadRequest, "failed to load profile", err.Error())
         return
@@ -43,7 +43,7 @@ func (h *StudentController) GetMyProfile(c *gin.Context) {
         return
     }
 
-    utils.JSONSuccess(c, http.StatusOK, mapStudentToResponse(student))
+    utils.JSONSuccess(c, http.StatusOK, mapStudentToResponse(student, attachment))
 }
 
 // UpsertMyProfile creates or updates the current student's profile.
@@ -64,7 +64,7 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
         return
     }
 
-    student, err := h.findByUserID(userID)
+    student, _, err := h.findByUserID(userID)
     if err != nil {
         utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
         return
@@ -77,6 +77,15 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
 
     student.FirstName = payload.FirstName
     student.LastName = payload.LastName
+    
+    if payload.DateOfBirth != "" {
+        if parsed, err := time.Parse("2006-01-02", payload.DateOfBirth); err == nil {
+            student.DateOfBirth = &parsed
+        }
+    } else {
+        student.DateOfBirth = nil
+    }
+
     student.Address = payload.Address
     student.University = payload.University
     student.Faculty = payload.Faculty
@@ -94,33 +103,91 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
         return
     }
 
-    utils.JSONSuccess(c, http.StatusOK, mapStudentToResponse(student))
+    if payload.ProfilePicture != "" {
+        if err := h.db.Model(&models.User{}).Where("user_id = ?", userID).Update("profile_picture", payload.ProfilePicture).Error; err != nil {
+            utils.JSONError(c, http.StatusInternalServerError, "failed to update profile picture", err.Error())
+            return
+        }
+    }
+
+    var attachment models.AttachmentStudent
+    err = h.db.Where("user_id = ?", userID).First(&attachment).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            attachment = models.AttachmentStudent{UserID: userID}
+        } else {
+            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            return
+        }
+    }
+
+    attachment.Schedule = payload.Schedule
+    attachment.Transcript = payload.Transcript
+    attachment.Resume = payload.Resume
+
+    if attachment.AttachmentStudentID == 0 {
+        h.db.Create(&attachment)
+    } else {
+        h.db.Save(&attachment)
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, mapStudentToResponse(student, &attachment))
 }
 
-func (h *StudentController) findByUserID(userID uint) (*models.Student, error) {
+func (h *StudentController) findByUserID(userID uint) (*models.Student, *models.AttachmentStudent, error) {
     var student models.Student
     err := h.db.Where("user_id = ?", userID).First(&student).Error
     if err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
-            return nil, nil
+            return nil, nil, nil
         }
-        return nil, err
+        return nil, nil, err
     }
-    return &student, nil
+    
+    var attachment models.AttachmentStudent
+    h.db.Where("user_id = ?", userID).First(&attachment)
+    return &student, &attachment, nil
 }
 
-func mapStudentToResponse(student *models.Student) *dto.StudentProfileResponse {
+func mapStudentToResponse(student *models.Student, attachment *models.AttachmentStudent) *dto.StudentProfileResponse {
+    var dob string
+    if student.DateOfBirth != nil {
+        dob = student.DateOfBirth.Format("2006-01-02")
+    }
+
+    schedule := ""
+    transcript := ""
+    resume := ""
+    if attachment != nil {
+        schedule = attachment.Schedule
+        transcript = attachment.Transcript
+        resume = attachment.Resume
+    }
+
     return &dto.StudentProfileResponse{
+<<<<<<< Updated upstream
         ID:         student.ID,
         UserID:     student.UserID,
         FirstName:  student.FirstName,
         LastName:   student.LastName,
         Address:    student.Address,
         University: student.University,
+=======
+        ID:          student.UserID,
+        UserID:      student.UserID,
+        FirstName:   student.FirstName,
+        LastName:    student.LastName,
+        DateOfBirth: dob,
+        Address:     student.Address,
+        University:  student.University,
+>>>>>>> Stashed changes
         Faculty:    student.Faculty,
         Major:      student.Major,
         Years:      student.Years,
         Skill:      student.Skill,
+        Schedule:   schedule,
+        Transcript: transcript,
+        Resume:     resume,
         CreatedAt:  student.CreatedAt.Format(time.RFC3339),
         UpdatedAt:  student.UpdatedAt.Format(time.RFC3339),
     }

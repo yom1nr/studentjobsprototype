@@ -12,8 +12,9 @@ type User struct {
 	UserName string `gorm:"size:100;not null" json:"user_name"`
 	Password string `gorm:"size:255;not null" json:"-"`
 	Email    string `gorm:"size:150;uniqueIndex;not null" json:"email"`
-	Phone    string `gorm:"size:20" json:"phone"`
-	Gender   string `gorm:"size:20" json:"gender"`
+	Phone          string `gorm:"size:20" json:"phone"`
+	Gender         string `gorm:"size:20" json:"gender"`
+	ProfilePicture string `gorm:"type:text" json:"profile_picture"`
 	Role     string `gorm:"size:20;not null;default:'student'" json:"role"` // student | employer | admin
 
 	// 1-to-1 Profiles
@@ -54,6 +55,13 @@ type Employer struct {
 	Link           string    `gorm:"size:255" json:"link"`
 	CompanyAddress string    `gorm:"type:text" json:"company_address"`
 	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
+<<<<<<< Updated upstream
+=======
+	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	Approve *Approve `gorm:"foreignKey:UserID;references:UserID" json:"approve,omitempty"`
+	AttachmentEmployer *AttachmentEmployer `gorm:"foreignKey:UserID;references:UserID" json:"attachment_employer,omitempty"`
+>>>>>>> Stashed changes
 }
 
 // Admin profile – linked to a User account (1-to-1).

@@ -10,13 +10,12 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
-import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../../../services/https'
 import { ErrorAlert } from '../../../components/ErrorAlert'
 import { useAuth } from '../../../auth/useAuth'
 import { upsertMyEmployerProfile } from '../../../services/https/employer'
+import { UploadCard } from '../../../components/UploadCard'
 
 const colors = { navy: '#000349', bg: '#DAEAF7' }
 
@@ -38,6 +37,10 @@ type FormState = {
   contactEmail: string
   position: string
   lineId: string
+  companyRegis: string
+  logo: string
+  cardId: string
+  profilePicture: string
 }
 
 const INITIAL: FormState = {
@@ -56,6 +59,10 @@ const INITIAL: FormState = {
   contactEmail: '',
   position: '',
   lineId: '',
+  companyRegis: '',
+  logo: '',
+  cardId: '',
+  profilePicture: '',
 }
 
 const PAGE_SUBTITLE: Record<number, string> = {
@@ -65,34 +72,7 @@ const PAGE_SUBTITLE: Record<number, string> = {
   4: 'ตรวจสอบข้อมูลให้ถูกต้องก่อนส่งคำขอ',
 }
 
-function UploadCard({ label, camera }: Readonly<{ label: string; camera?: boolean }>) {
-  return (
-    <Box>
-      <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.75 }}>{label}</Typography>
-      <Box
-        component="label"
-        sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          textAlign: 'center',
-          gap: 1,
-          border: '1.5px dashed #B9C6DC',
-          borderRadius: 3,
-          p: 3,
-          cursor: 'pointer',
-          '&:hover': { bgcolor: '#F7FAFF' },
-        }}
-      >
-        <input type="file" accept=".pdf,.jpg,.jpeg,.png" hidden />
-        {camera ? <PhotoCameraOutlinedIcon sx={{ color: colors.navy, fontSize: 32 }} /> : <CloudUploadOutlinedIcon sx={{ color: colors.navy, fontSize: 32 }} />}
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>คลิกเพื่อเลือกไฟล์</Typography>
-        <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>หรือ ลากไฟล์มาวางที่นี่</Typography>
-        <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)</Typography>
-      </Box>
-    </Box>
-  )
-}
+
 
 function ReviewRow({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
@@ -105,7 +85,7 @@ function ReviewRow({ label, value }: Readonly<{ label: string; value: string }>)
 
 export default function RegisterEmployerPage() {
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, refreshProfile } = useAuth()
 
   const [page, setPage] = useState(1)
   const [form, setForm] = useState(INITIAL)
@@ -121,6 +101,8 @@ export default function RegisterEmployerPage() {
     form.userName.trim().length >= 2 &&
     form.email.trim().length > 0 &&
     form.password.length >= 8 &&
+    /[a-zA-Z]/.test(form.password) &&
+    /[0-9]/.test(form.password) &&
     form.password === form.confirmPassword &&
     form.companyName.trim().length > 0 &&
     form.taxId.trim().length > 0 &&
@@ -156,7 +138,12 @@ export default function RegisterEmployerPage() {
         tax_id: form.taxId.trim(),
         link: form.website.trim() || undefined,
         company_address: form.address.trim() || undefined,
+        company_regis: form.companyRegis || undefined,
+        logo: form.logo || undefined,
+        card_id: form.cardId || undefined,
+        profile_picture: form.profilePicture || undefined,
       })
+      await refreshProfile()
       navigate('/profile', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -252,10 +239,10 @@ export default function RegisterEmployerPage() {
         <Box sx={{ bgcolor: '#FFFFFF', borderRadius: 4, p: { xs: 3, md: 5 }, maxWidth: 900, mx: 'auto', boxShadow: '0px 8px 40px rgba(0,3,73,0.06)' }}>
           <StepHeading step={4} title="เอกสารยืนยันและข้อมูลเพิ่มเติม" />
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 3 }}>
-            <UploadCard label="หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า" />
-            <UploadCard label="โลโก้บริษัท / ร้านค้า (ถ้ามี)" />
-            <UploadCard label="บัตรประชาชนของผู้มีอำนาจลงนาม" />
-            <UploadCard label="รูปโปรไฟล์" camera />
+            <UploadCard label="หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า" value={form.companyRegis} onUpload={(url) => set('companyRegis', url)} />
+            <UploadCard label="โลโก้บริษัท / ร้านค้า (ถ้ามี)" value={form.logo} onUpload={(url) => set('logo', url)} />
+            <UploadCard label="บัตรประชาชนของผู้มีอำนาจลงนาม" value={form.cardId} onUpload={(url) => set('cardId', url)} />
+            <UploadCard label="รูปโปรไฟล์" camera value={form.profilePicture} onUpload={(url) => set('profilePicture', url)} />
           </Box>
         </Box>
       )}

@@ -5,6 +5,7 @@ export type User = {
   phone: string
   gender: string
   role: string   // 'student' | 'employer' | 'admin'
+  profile_picture: string
   created_at: string
   updated_at: string
 }
@@ -17,4 +18,5 @@ export type UpdateProfileRequest = {
   phone?: string
   gender?: string
   role?: string
+  profile_picture?: string
 }

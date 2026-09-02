@@ -22,6 +22,7 @@ func SetupRouter(
     timeRecordHandler *controllers.TimeRecordController,
     payrollHandler *controllers.PayrollController,
     complaintHandler *controllers.ComplaintController,
+    uploadHandler *controllers.UploadController,
 ) *gin.Engine {
     router := gin.New()
     router.Use(gin.Logger())
@@ -29,6 +30,10 @@ func SetupRouter(
 
     // Public Routes
     api := router.Group("/api/v1")
+    
+    // Upload route
+    api.POST("/upload", uploadHandler.UploadFile)
+
     auth := api.Group("/auth")
     auth.POST("/register", authHandler.Register)
     auth.POST("/login", authHandler.Login)
@@ -51,6 +56,7 @@ func SetupRouter(
     employer.POST("/jobposts", jobpostHandler.CreateJobpost)
     employer.PUT("/jobposts/:id", jobpostHandler.UpdateJobpost)
     employer.POST("/jobposts/:id/close", jobpostHandler.CloseJobpost)
+    employer.DELETE("/jobposts/:id", jobpostHandler.DeleteJobpost)
 
     // Job posts — public browsing (no login required; only applying needs an account)
     jobposts := api.Group("/jobposts")
@@ -135,6 +141,7 @@ func SetupRouter(
     admin.GET("/employers/:id", adminHandler.GetEmployerDetail)
     admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)
     admin.POST("/employers/:id/reject", adminHandler.RejectEmployer)
+    admin.POST("/employers/:id/request-document", adminHandler.RequestDocuments)
     admin.GET("/complaints", complaintHandler.ListAll)
     admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
 

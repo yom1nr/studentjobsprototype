@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "log"
+    "os"
 
     "github.com/gin-gonic/gin"
     "github.com/joho/godotenv"
@@ -43,6 +44,7 @@ func main() {
     timeRecordController := controllers.NewTimeRecordController(db)
     payrollController := controllers.NewPayrollController(db)
     complaintController := controllers.NewComplaintController(db)
+    uploadController := controllers.NewUploadController()
 
     router := routes.SetupRouter(
         authController,
@@ -58,8 +60,14 @@ func main() {
         timeRecordController,
         payrollController,
         complaintController,
+        uploadController,
     )
     router.Use(gin.Recovery())
+
+    // Ensure uploads directory exists
+    os.MkdirAll("uploads", os.ModePerm)
+    // Serve static files from the uploads directory
+    router.Static("/uploads", "./uploads")
 
     port := cfg.ServerPort
     if port == "" {

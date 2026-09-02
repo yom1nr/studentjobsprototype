@@ -94,6 +94,7 @@ func (h *AuthController) Register(c *gin.Context) {
             Phone:     user.Phone,
             Gender:    user.Gender,
             Role:      user.Role,
+            ProfilePicture: user.ProfilePicture,
             CreatedAt: user.CreatedAt.Format(time.RFC3339),
             UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
         },
@@ -113,7 +114,7 @@ func (h *AuthController) Login(c *gin.Context) {
         return
     }
 
-    user, err := h.findByEmail(payload.Email)
+    user, err := h.findByIdentifier(payload.Email)
     if err != nil {
         utils.JSONError(c, http.StatusUnauthorized, msgLoginFailed, err.Error())
         return
@@ -143,6 +144,7 @@ func (h *AuthController) Login(c *gin.Context) {
             Phone:     user.Phone,
             Gender:    user.Gender,
             Role:      user.Role,
+            ProfilePicture: user.ProfilePicture,
             CreatedAt: user.CreatedAt.Format(time.RFC3339),
             UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
         },
@@ -152,6 +154,18 @@ func (h *AuthController) Login(c *gin.Context) {
 func (h *AuthController) findByEmail(email string) (*models.User, error) {
     var user models.User
     err := h.db.Where("email = ?", email).First(&user).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, nil
+        }
+        return nil, err
+    }
+    return &user, nil
+}
+
+func (h *AuthController) findByIdentifier(identifier string) (*models.User, error) {
+    var user models.User
+    err := h.db.Where("email = ? OR user_name = ?", identifier, identifier).First(&user).Error
     if err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             return nil, nil

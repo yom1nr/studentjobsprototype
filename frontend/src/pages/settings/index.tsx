@@ -29,7 +29,7 @@ type Profile = {
   firstName: string
   lastName: string
   gender: string
-  age: string
+  dob: string
   address: string
   university: string
   faculty: string
@@ -43,7 +43,7 @@ const EMPTY_PROFILE: Profile = {
   firstName: '',
   lastName: '',
   gender: '',
-  age: '',
+  dob: '',
   address: '',
   university: '',
   faculty: '',
@@ -57,7 +57,7 @@ const fieldRows: { key: keyof Profile; label: string }[] = [
   { key: 'firstName', label: 'ชื่อ' },
   { key: 'lastName', label: 'นามสกุล' },
   { key: 'gender', label: 'เพศ' },
-  { key: 'age', label: 'อายุ' },
+  { key: 'dob', label: 'อายุ' },
   { key: 'address', label: 'ที่อยู่' },
   { key: 'university', label: 'มหาวิทยาลัย' },
   { key: 'faculty', label: 'คณะ' },
@@ -94,6 +94,9 @@ type EmployerProfile = {
   position: string
   phone: string
   lineId: string
+  companyRegis: string
+  logo: string
+  cardId: string
 }
 
 const EMPTY_EMPLOYER_PROFILE: EmployerProfile = {
@@ -108,6 +111,9 @@ const EMPTY_EMPLOYER_PROFILE: EmployerProfile = {
   position: '',
   phone: '',
   lineId: '',
+  companyRegis: '',
+  logo: '',
+  cardId: '',
 }
 
 const companyFieldRows: { key: keyof EmployerProfile; label: string }[] = [
@@ -143,8 +149,8 @@ type EmployerTabKey = (typeof EMPLOYER_TABS)[number]['key']
 type CompanyDocument = { key: string; label: string; hint: string; fileName: string | null }
 
 const INITIAL_COMPANY_DOCUMENTS: CompanyDocument[] = [
-  { key: 'registration', label: 'หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
-  { key: 'signatoryId', label: 'บัตรประชาชนของผู้มีอำนาจลงนาม', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
+  { key: 'companyRegis', label: 'หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
+  { key: 'cardId', label: 'บัตรประชาชนของผู้มีอำนาจลงนาม', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
   { key: 'logo', label: 'โลโก้บริษัท / ร้านค้า (ถ้ามี)', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
 ]
 
@@ -188,7 +194,11 @@ function UploadRow({
           accept=".pdf,.jpg,.jpeg,.png"
           onChange={(e) => {
             const file = e.target.files?.[0]
-            if (file) onUpload(document.key, file.name)
+            if (file) {
+              import('../../services/https/upload').then((m) => {
+                m.uploadFile(file).then((url) => onUpload(document.key, url))
+              })
+            }
           }}
         />
         <UploadOutlinedIcon />
@@ -197,10 +207,11 @@ function UploadRow({
   )
 }
 
-const APPROVE_STATUS_LABEL: Record<string, { label: string; color: 'warning' | 'success' | 'error' }> = {
+const APPROVE_STATUS_LABEL: Record<string, { label: string; color: 'warning' | 'success' | 'error' | 'info' }> = {
   pending: { label: 'รอการอนุมัติ', color: 'warning' },
   approved: { label: 'อนุมัติแล้ว', color: 'success' },
   rejected: { label: 'ไม่อนุมัติ', color: 'error' },
+  request_document: { label: 'รอเอกสารเพิ่มเติม', color: 'info' },
 }
 
 function apiToLocalProfile(api: EmployerProfileApi | null, account: { email: string; phone: string }): EmployerProfile {
@@ -216,6 +227,9 @@ function apiToLocalProfile(api: EmployerProfileApi | null, account: { email: str
     position: api?.position ?? '',
     phone: account.phone,
     lineId: api?.line_id ?? '',
+    companyRegis: api?.company_regis ?? '',
+    logo: api?.logo ?? '',
+    cardId: api?.card_id ?? '',
   }
 }
 
@@ -235,8 +249,19 @@ function EmployerSettingsView() {
   const [savedNotice, setSavedNotice] = useState(false)
 
   const [activeTab, setActiveTab] = useState<EmployerTabKey>('company')
-  const [documents, setDocuments] = useState(INITIAL_COMPANY_DOCUMENTS)
+  const documents = useMemo(() => {
+    return INITIAL_COMPANY_DOCUMENTS.map((d) => ({
+      ...d,
+      fileName: profile[d.key as keyof EmployerProfile] || null,
+    }))
+  }, [profile])
   const [avatarName, setAvatarName] = useState<string | null>(null)
+
+  // Account tab — username / email editing
+  const [accountEditing, setAccountEditing] = useState(false)
+  const [accountDraft, setAccountDraft] = useState({ userName: '', email: '' })
+  const [accountSaving, setAccountSaving] = useState(false)
+  const [accountError, setAccountError] = useState<string | null>(null)
 
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
@@ -296,6 +321,9 @@ function EmployerSettingsView() {
         tax_id: draft.taxId.trim(),
         link: draft.website.trim() || undefined,
         company_address: draft.companyAddress.trim() || undefined,
+        company_regis: draft.companyRegis || undefined,
+        logo: draft.logo || undefined,
+        card_id: draft.cardId || undefined,
       })
       if (draft.phone.trim() !== (user?.phone ?? '')) {
         await updateProfile({ phone: draft.phone.trim() || undefined })
@@ -315,8 +343,60 @@ function EmployerSettingsView() {
     }
   }
 
-  function uploadDocument(key: string, fileName: string) {
-    setDocuments((docs) => docs.map((d) => (d.key === key ? { ...d, fileName } : d)))
+  function startEditAccount() {
+    setAccountDraft({ userName: user?.user_name ?? '', email: user?.email ?? '' })
+    setAccountError(null)
+    setAccountEditing(true)
+  }
+
+  async function saveAccount() {
+    if (!token) return
+    setAccountError(null)
+    setAccountSaving(true)
+    try {
+      await updateProfile({
+        user_name: accountDraft.userName.trim() || undefined,
+        email: accountDraft.email.trim() || undefined,
+      })
+      setAccountEditing(false)
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setAccountError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setAccountError('บันทึกไม่สำเร็จ')
+      }
+    } finally {
+      setAccountSaving(false)
+    }
+  }
+
+  async function uploadDocument(key: string, fileName: string) {
+    if (!token) return
+    setSaving(true)
+    try {
+      const api = await upsertMyEmployerProfile(token, {
+        first_name: profile.contactFirstName.trim(),
+        last_name: profile.contactLastName.trim(),
+        position: profile.position.trim() || undefined,
+        line_id: profile.lineId.trim() || undefined,
+        company_name: profile.companyName.trim(),
+        business_type: profile.businessType.trim() || undefined,
+        tax_id: profile.taxId.trim(),
+        link: profile.website.trim() || undefined,
+        company_address: profile.companyAddress.trim() || undefined,
+        company_regis: key === 'companyRegis' ? fileName : (profile.companyRegis || undefined),
+        logo: key === 'logo' ? fileName : (profile.logo || undefined),
+        card_id: key === 'cardId' ? fileName : (profile.cardId || undefined),
+      })
+      setProfile(apiToLocalProfile(api, { email: user?.email ?? '', phone: profile.phone }))
+      setApproveStatus(api.approve_status)
+      setSavedNotice(true)
+    } catch {
+      setError('อัปโหลดไฟล์สำเร็จแต่บันทึกข้อมูลไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function changePassword() {
@@ -392,6 +472,34 @@ function EmployerSettingsView() {
               <Button
                 startIcon={<EditOutlinedIcon />}
                 onClick={startEdit}
+                sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
+              >
+                แก้ไขข้อมูล
+              </Button>
+            ))}
+          {activeTab === 'account' &&
+            (accountEditing ? (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  startIcon={<CheckOutlinedIcon />}
+                  onClick={() => void saveAccount()}
+                  disabled={accountSaving}
+                  sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  บันทึก
+                </Button>
+                <Button
+                  startIcon={<CloseOutlinedIcon />}
+                  onClick={() => { setAccountEditing(false); setAccountError(null) }}
+                  sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  ยกเลิก
+                </Button>
+              </Box>
+            ) : (
+              <Button
+                startIcon={<EditOutlinedIcon />}
+                onClick={startEditAccount}
                 sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
               >
                 แก้ไขข้อมูล
@@ -493,9 +601,14 @@ function EmployerSettingsView() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    overflow: 'hidden',
                   }}
                 >
-                  <PersonIcon sx={{ fontSize: 72, color: '#9AA0A6' }} />
+                  {user?.profile_picture ? (
+                    <Box component="img" src={user.profile_picture} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <PersonIcon sx={{ fontSize: 72, color: '#9AA0A6' }} />
+                  )}
                 </Box>
                 <Box
                   component="label"
@@ -514,7 +627,19 @@ function EmployerSettingsView() {
                     type="file"
                     hidden
                     accept=".jpg,.jpeg,.png"
-                    onChange={(e) => setAvatarName(e.target.files?.[0]?.name ?? null)}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setAvatarName('กำลังอัปโหลด...')
+                      try {
+                        const m = await import('../../services/https/upload')
+                        const url = await m.uploadFile(file)
+                        await updateProfile({ profile_picture: url })
+                        setAvatarName('อัปโหลดสำเร็จ')
+                      } catch (err) {
+                        setAvatarName('อัปโหลดล้มเหลว')
+                      }
+                    }}
                   />
                   <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
                   <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -527,8 +652,25 @@ function EmployerSettingsView() {
               </Box>
 
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1, maxWidth: 380 }}>
-                <TextField label="ชื่อผู้ใช้" size="small" value={user.user_name} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-                <TextField label="อีเมล" size="small" value={user.email} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+                {accountError && <ErrorAlert message={accountError} />}
+                <TextField
+                  label="ชื่อผู้ใช้"
+                  size="small"
+                  value={accountEditing ? accountDraft.userName : user.user_name}
+                  onChange={(e) => setAccountDraft((d) => ({ ...d, userName: e.target.value }))}
+                  disabled={!accountEditing}
+                  fullWidth
+                  sx={{ bgcolor: colors.field, borderRadius: 1 }}
+                />
+                <TextField
+                  label="อีเมล"
+                  size="small"
+                  value={accountEditing ? accountDraft.email : user.email}
+                  onChange={(e) => setAccountDraft((d) => ({ ...d, email: e.target.value }))}
+                  disabled={!accountEditing}
+                  fullWidth
+                  sx={{ bgcolor: colors.field, borderRadius: 1 }}
+                />
                 <Button
                   onClick={() => setPasswordOpen(true)}
                   endIcon={<ChevronRightIcon />}
@@ -663,7 +805,7 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
     firstName: api?.first_name ?? account.userName,
     lastName: api?.last_name ?? '',
     gender: account.gender,
-    age: '',
+    dob: api?.date_of_birth ? api.date_of_birth.split('T')[0] : '',
     address: api?.address ?? '',
     university: api?.university ?? '',
     faculty: api?.faculty ?? '',
@@ -674,6 +816,14 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
   }
 }
 
+const STUDENT_TABS = [
+  { key: 'profile', label: 'ข้อมูลส่วนตัว' },
+  { key: 'documents', label: 'เอกสาร' },
+  { key: 'account', label: 'บัญชี' },
+] as const
+
+type StudentTabKey = (typeof STUDENT_TABS)[number]['key']
+
 function StudentSettingsView() {
   usePageTitle('ข้อมูลส่วนตัวนักศึกษา')
   const { user, token, updateProfile } = useAuth()
@@ -681,6 +831,7 @@ function StudentSettingsView() {
   const [profile, setProfile] = useState<Profile>(() =>
     apiToLocalStudentProfile(null, { userName: user?.user_name ?? '', phone: user?.phone ?? '', gender: user?.gender ?? '' }),
   )
+  const [activeTab, setActiveTab] = useState<StudentTabKey>('profile')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(EMPTY_PROFILE)
   const [loadingProfile, setLoadingProfile] = useState(true)
@@ -692,6 +843,24 @@ function StudentSettingsView() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const [avatarName, setAvatarName] = useState<string | null>(null)
+
+  // Account tab — username / email editing
+  const [accountEditing, setAccountEditing] = useState(false)
+  const [accountDraft, setAccountDraft] = useState({ userName: '', email: '' })
+  const [accountSaving, setAccountSaving] = useState(false)
+  const [accountError, setAccountError] = useState<string | null>(null)
+
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -733,6 +902,7 @@ function StudentSettingsView() {
       const api = await upsertMyStudentProfile(token, {
         first_name: draft.firstName.trim(),
         last_name: draft.lastName.trim(),
+        date_of_birth: draft.dob || undefined,
         address: draft.address.trim() || undefined,
         university: draft.university.trim() || undefined,
         faculty: draft.faculty.trim() || undefined,
@@ -754,6 +924,67 @@ function StudentSettingsView() {
       }
     } finally {
       setSaving(false)
+    }
+  }
+
+  function startEditAccount() {
+    setAccountDraft({ userName: user?.user_name ?? '', email: user?.email ?? '' })
+    setAccountError(null)
+    setAccountEditing(true)
+  }
+
+  async function saveAccount() {
+    if (!token) return
+    setAccountError(null)
+    setAccountSaving(true)
+    try {
+      await updateProfile({
+        user_name: accountDraft.userName.trim() || undefined,
+        email: accountDraft.email.trim() || undefined,
+      })
+      setAccountEditing(false)
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setAccountError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setAccountError('บันทึกไม่สำเร็จ')
+      }
+    } finally {
+      setAccountSaving(false)
+    }
+  }
+
+  async function changePassword() {
+    setPasswordError(null)
+    if (currentPassword.length === 0) {
+      setPasswordError('กรุณากรอกรหัสผ่านปัจจุบัน')
+      return
+    }
+    if (newPassword.length < 8) {
+      setPasswordError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('รหัสผ่านไม่ตรงกัน')
+      return
+    }
+    setPasswordSaving(true)
+    try {
+      await updateProfile({ current_password: currentPassword, password: newPassword })
+      setPasswordOpen(false)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setSavedNotice(true)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setPasswordError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setPasswordError('เปลี่ยนรหัสผ่านไม่สำเร็จ')
+      }
+    } finally {
+      setPasswordSaving(false)
     }
   }
 
@@ -808,119 +1039,396 @@ function StudentSettingsView() {
       <ErrorAlert message={error} />
 
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
+        {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>
-            {editing ? 'แก้ไขข้อมูลส่วนตัว' : 'ข้อมูลส่วนตัว'}
+            {activeTab === 'profile' && editing ? 'แก้ไขข้อมูลส่วนตัว' : activeTab === 'account' ? 'จัดการบัญชี' : activeTab === 'documents' ? 'เอกสารที่อัปโหลด' : 'ข้อมูลส่วนตัว'}
           </Typography>
-          {editing ? (
-            <Box sx={{ display: 'flex', gap: 1 }}>
+          {activeTab === 'profile' &&
+            (editing ? (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  startIcon={<CheckOutlinedIcon />}
+                  onClick={() => void saveProfile()}
+                  disabled={saving}
+                  sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  บันทึก
+                </Button>
+                <Button
+                  startIcon={<CloseOutlinedIcon />}
+                  onClick={() => setEditing(false)}
+                  sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  ยกเลิก
+                </Button>
+              </Box>
+            ) : (
               <Button
-                startIcon={<CheckOutlinedIcon />}
-                onClick={() => void saveProfile()}
-                disabled={saving}
-                sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                startIcon={<EditOutlinedIcon />}
+                onClick={startEdit}
+                sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
               >
-                บันทึก
+                แก้ไขข้อมูล
               </Button>
+            ))}
+          {activeTab === 'account' &&
+            (accountEditing ? (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  startIcon={<CheckOutlinedIcon />}
+                  onClick={() => void saveAccount()}
+                  disabled={accountSaving}
+                  sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  บันทึก
+                </Button>
+                <Button
+                  startIcon={<CloseOutlinedIcon />}
+                  onClick={() => { setAccountEditing(false); setAccountError(null) }}
+                  sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                >
+                  ยกเลิก
+                </Button>
+              </Box>
+            ) : (
               <Button
-                startIcon={<CloseOutlinedIcon />}
-                onClick={() => setEditing(false)}
-                sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+                startIcon={<EditOutlinedIcon />}
+                onClick={startEditAccount}
+                sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
               >
-                ยกเลิก
+                แก้ไขข้อมูล
               </Button>
-            </Box>
-          ) : (
+            ))}
+          {activeTab === 'documents' && (
             <Button
-              startIcon={<EditOutlinedIcon />}
-              onClick={startEdit}
+              startIcon={<UploadOutlinedIcon />}
+              onClick={() => setUploadOpen(true)}
               sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
             >
-              แก้ไขข้อมูล
+              อัปโหลด
             </Button>
           )}
         </Box>
 
-        {editing ? (
-          <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3, alignItems: 'center' }}>
-            {fieldRows.map((row) =>
-              row.key === 'gender' ? (
-                <Box key={row.key} sx={{ display: 'contents' }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
-                  <TextField
-                    select
-                    size="small"
-                    value={draft.gender}
-                    onChange={(e) => setDraft({ ...draft, gender: e.target.value })}
-                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
-                  >
-                    <MenuItem value="ชาย">ชาย</MenuItem>
-                    <MenuItem value="หญิง">หญิง</MenuItem>
-                    <MenuItem value="อื่น ๆ">อื่น ๆ</MenuItem>
-                  </TextField>
-                </Box>
-              ) : (
-                <Box key={row.key} sx={{ display: 'contents' }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
-                  <TextField
-                    size="small"
-                    value={draft[row.key]}
-                    onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
-                    multiline={row.key === 'skills'}
-                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: row.key === 'address' || row.key === 'skills' ? 480 : 320 }}
-                  />
-                </Box>
-              ),
-            )}
-          </Box>
-        ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3 }}>
-            {fieldRows.map((row) => (
-              <Box key={row.key} sx={{ display: 'contents' }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
-                <Typography sx={{ fontSize: 16, color: profile[row.key] ? '#000' : '#9AA0A6' }}>
-                  {profile[row.key] || 'ยังไม่ระบุ'}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-        )}
-      </Box>
-
-      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>เอกสารที่อัปโหลด</Typography>
-          <Button
-            startIcon={<UploadOutlinedIcon />}
-            onClick={() => setUploadOpen(true)}
-            sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
-          >
-            อัปโหลด
-          </Button>
+        {/* Tab bar */}
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 3 }}>
+          {STUDENT_TABS.map((tab) => (
+            <Button
+              key={tab.key}
+              onClick={() => {
+                setActiveTab(tab.key)
+                setEditing(false)
+              }}
+              variant={activeTab === tab.key ? 'contained' : 'outlined'}
+              sx={{
+                borderRadius: '20px',
+                textTransform: 'none',
+                px: 2.5,
+                bgcolor: activeTab === tab.key ? colors.navy : 'transparent',
+                borderColor: colors.border,
+                color: activeTab === tab.key ? '#fff' : colors.navy,
+                '&:hover': { bgcolor: activeTab === tab.key ? '#000226' : '#F7FAFF' },
+              }}
+            >
+              {tab.label}
+            </Button>
+          ))}
         </Box>
 
-        <Box>
-          {documents.map((doc, index) => (
-            <Box key={doc.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2, borderTop: index > 0 ? '1px solid #E8E8E8' : 'none' }}>
-              <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
-              <Box sx={{ flex: 1 }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{doc.name}</Typography>
-                <Typography sx={{ fontSize: 14, color: '#000' }}>อัปโหลดเมื่อ {doc.uploadedAt}</Typography>
+        {/* Tab content */}
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
+          {/* ข้อมูลส่วนตัว */}
+          {activeTab === 'profile' &&
+            (editing ? (
+              <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3, alignItems: 'center' }}>
+                {fieldRows.map((row) =>
+                  row.key === 'gender' ? (
+                    <Box key={row.key} sx={{ display: 'contents' }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                      <TextField
+                        select
+                        size="small"
+                        value={draft.gender}
+                        onChange={(e) => setDraft({ ...draft, gender: e.target.value })}
+                        sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
+                      >
+                        <MenuItem value="ชาย">ชาย</MenuItem>
+                        <MenuItem value="หญิง">หญิง</MenuItem>
+                        <MenuItem value="อื่น ๆ">อื่น ๆ</MenuItem>
+                      </TextField>
+                    </Box>
+                  ) : row.key === 'dob' ? (
+                    <Box key={row.key} sx={{ display: 'contents' }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={draft[row.key]}
+                        onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
+                      />
+                    </Box>
+                  ) : (
+                    <Box key={row.key} sx={{ display: 'contents' }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                      <TextField
+                        size="small"
+                        value={draft[row.key]}
+                        onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
+                        multiline={row.key === 'skills'}
+                        sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: row.key === 'address' || row.key === 'skills' ? 480 : 320 }}
+                      />
+                    </Box>
+                  ),
+                )}
               </Box>
-              <Button
-                onClick={() => removeDocument(doc.id)}
-                sx={{ bgcolor: '#FF564A', color: '#fff', textTransform: 'none', borderRadius: '20px', minWidth: 60, px: 1.5, fontSize: 13 }}
-              >
-                ลบ
-              </Button>
-            </Box>
-          ))}
+            ) : (
+              <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3 }}>
+                {fieldRows.map((row) => (
+                  <Box key={row.key} sx={{ display: 'contents' }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                    <Typography sx={{ fontSize: 16, color: profile[row.key] ? '#000' : '#9AA0A6' }}>
+                      {row.key === 'dob' && profile[row.key]
+                        ? (() => {
+                            const today = new Date()
+                            const birthDate = new Date(profile[row.key])
+                            let age = today.getFullYear() - birthDate.getFullYear()
+                            const m = today.getMonth() - birthDate.getMonth()
+                            if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                              age--
+                            }
+                            return `${age} ปี`
+                          })()
+                        : profile[row.key] || 'ยังไม่ระบุ'}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            ))}
 
-          {documents.length === 0 && (
-            <Typography sx={{ color: '#697077', textAlign: 'center', py: 3 }}>ยังไม่มีเอกสารที่อัปโหลด</Typography>
+          {/* เอกสาร */}
+          {activeTab === 'documents' && (
+            <Box>
+              {documents.map((doc, index) => (
+                <Box key={doc.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2, borderTop: index > 0 ? '1px solid #E8E8E8' : 'none' }}>
+                  <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
+                  <Box sx={{ flex: 1 }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{doc.name}</Typography>
+                    <Typography sx={{ fontSize: 14, color: '#000' }}>อัปโหลดเมื่อ {doc.uploadedAt}</Typography>
+                  </Box>
+                  <Button
+                    onClick={() => removeDocument(doc.id)}
+                    sx={{ bgcolor: '#FF564A', color: '#fff', textTransform: 'none', borderRadius: '20px', minWidth: 60, px: 1.5, fontSize: 13 }}
+                  >
+                    ลบ
+                  </Button>
+                </Box>
+              ))}
+              {documents.length === 0 && (
+                <Typography sx={{ color: '#697077', textAlign: 'center', py: 3 }}>ยังไม่มีเอกสารที่อัปโหลด</Typography>
+              )}
+            </Box>
+          )}
+
+          {/* บัญชี */}
+          {activeTab === 'account' && (
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 4 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <Box
+                  sx={{
+                    width: 140,
+                    height: 140,
+                    borderRadius: '50%',
+                    bgcolor: colors.field,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {user?.profile_picture ? (
+                    <Box component="img" src={user.profile_picture} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <PersonIcon sx={{ fontSize: 72, color: '#9AA0A6' }} />
+                  )}
+                </Box>
+                <Box
+                  component="label"
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5,
+                    border: `1.5px solid ${colors.border}`,
+                    borderRadius: 3,
+                    p: 1.5,
+                    cursor: 'pointer',
+                    width: 260,
+                  }}
+                >
+                  <input
+                    type="file"
+                    hidden
+                    accept=".jpg,.jpeg,.png"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setAvatarName('กำลังอัปโหลด...')
+                      try {
+                        const m = await import('../../services/https/upload')
+                        const url = await m.uploadFile(file)
+                        await updateProfile({ profile_picture: url })
+                        setAvatarName('อัปโหลดสำเร็จ')
+                      } catch (err) {
+                        setAvatarName('อัปโหลดล้มเหลว')
+                      }
+                    }}
+                  />
+                  <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 700, fontSize: 13, color: colors.navy }}>รูปโปรไฟล์</Typography>
+                    <Typography sx={{ fontSize: 11, color: '#9AA0A6' }} noWrap>
+                      {avatarName ?? 'รองรับไฟล์ JPG, PNG (ขนาดไม่เกิน 5MB)'}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1, maxWidth: 380 }}>
+                {accountError && <ErrorAlert message={accountError} />}
+                <TextField
+                  label="ชื่อผู้ใช้"
+                  size="small"
+                  value={accountEditing ? accountDraft.userName : user.user_name}
+                  onChange={(e) => setAccountDraft((d) => ({ ...d, userName: e.target.value }))}
+                  disabled={!accountEditing}
+                  fullWidth
+                  sx={{ bgcolor: colors.field, borderRadius: 1 }}
+                />
+                <TextField
+                  label="อีเมล"
+                  size="small"
+                  value={accountEditing ? accountDraft.email : user.email}
+                  onChange={(e) => setAccountDraft((d) => ({ ...d, email: e.target.value }))}
+                  disabled={!accountEditing}
+                  fullWidth
+                  sx={{ bgcolor: colors.field, borderRadius: 1 }}
+                />
+                <Button
+                  onClick={() => setPasswordOpen(true)}
+                  endIcon={<ChevronRightIcon />}
+                  sx={{
+                    justifyContent: 'space-between',
+                    bgcolor: colors.field,
+                    color: colors.navy,
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    borderRadius: 2,
+                    px: 2,
+                    py: 1.25,
+                    '&:hover': { bgcolor: '#E4E4E4' },
+                  }}
+                >
+                  เปลี่ยนรหัสผ่าน
+                </Button>
+              </Box>
+            </Box>
           )}
         </Box>
       </Box>
+
+      {/* Change password dialog */}
+      <Dialog open={passwordOpen} onClose={() => setPasswordOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>เปลี่ยนแปลงรหัสผ่านของคุณ</Typography>
+              <Typography sx={{ fontSize: 13, color: '#697077', mt: 0.5 }}>
+                รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร ประกอบด้วยอักษรและตัวเลข
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={() => setPasswordOpen(false)}>
+              <CloseOutlinedIcon />
+            </IconButton>
+          </Box>
+
+          <ErrorAlert message={passwordError} />
+
+          <TextField
+            label="รหัสผ่านปัจจุบัน"
+            placeholder="กรุณากรอกรหัสผ่านปัจจุบัน"
+            type={showCurrentPassword ? 'text' : 'password'}
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowCurrentPassword((v) => !v)} edge="end">
+                    {showCurrentPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+          <TextField
+            label="รหัสผ่านใหม่"
+            placeholder="กรุณากรอกรหัสผ่านใหม่"
+            type={showNewPassword ? 'text' : 'password'}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowNewPassword((v) => !v)} edge="end">
+                    {showNewPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+          <TextField
+            label="ยืนยันรหัสผ่าน"
+            placeholder="กรุณากรอกรหัสผ่าน"
+            type={showConfirmPassword ? 'text' : 'password'}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 1 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowConfirmPassword((v) => !v)} edge="end">
+                    {showConfirmPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+
+          <Typography
+            component={RouterLink}
+            to="/forgot-password"
+            sx={{ fontSize: 13, color: '#045BE4', fontWeight: 600, textDecoration: 'none', display: 'inline-block', mb: 3 }}
+          >
+            ลืมรหัสผ่าน?
+          </Typography>
+
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={() => void changePassword()}
+            disabled={passwordSaving}
+            sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
+          >
+            {passwordSaving ? 'กำลังบันทึก…' : 'เปลี่ยนรหัสผ่าน'}
+          </Button>
+        </Box>
+      </Dialog>
 
       {/* Upload dialog */}
       <Dialog open={uploadOpen} onClose={closeUploadDialog} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>

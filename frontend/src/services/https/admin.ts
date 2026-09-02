@@ -20,3 +20,7 @@ export function rejectEmployer(
 ): Promise<{ employer_id: number; status: string; reviewed_at: string }> {
   return apiFetch(`/api/v1/admin/employers/${employerId}/reject`, { method: 'POST', token, body: payload })
 }
+
+export function requestDocuments(token: string, employerId: number): Promise<{ employer_id: number; status: string; reviewed_at: string }> {
+  return apiFetch(`/api/v1/admin/employers/${employerId}/request-document`, { method: 'POST', token })
+}

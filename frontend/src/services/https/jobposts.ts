@@ -24,3 +24,7 @@ export function updateJobpost(token: string, id: number, payload: UpsertJobpostR
 export function closeJobpost(token: string, id: number): Promise<Jobpost> {
   return apiFetch<Jobpost>(`/api/v1/employer/jobposts/${id}/close`, { method: 'POST', token })
 }
+
+export function deleteJobpost(token: string, id: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/employer/jobposts/${id}`, { method: 'DELETE', token })
+}

@@ -34,6 +34,7 @@ func (h *AdminController) ListEmployerApprovals(c *gin.Context) {
     var users []models.User
     if err := h.db.
         Preload("Employer.Approve").
+        Preload("Employer.AttachmentEmployer").
         Where("role = ?", "employer").
         Find(&users).Error; err != nil {
         utils.JSONError(c, http.StatusInternalServerError, "failed to load employers", err.Error())
@@ -45,7 +46,11 @@ func (h *AdminController) ListEmployerApprovals(c *gin.Context) {
         if user.Employer == nil || user.Employer.Approve == nil {
             continue
         }
-        if user.Employer.Approve.Status != status {
+        if status == "pending" {
+            if user.Employer.Approve.Status != "pending" && user.Employer.Approve.Status != "request_document" {
+                continue
+            }
+        } else if user.Employer.Approve.Status != status {
             continue
         }
         responses = append(responses, mapEmployerApprovalToResponse(&user, user.Employer))
@@ -163,6 +168,42 @@ func (h *AdminController) RejectEmployer(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapEmployerApprovalStatus(employer))
 }
 
+// RequestDocuments sets an employer's approval status to 'request_document' and notifies them.
+func (h *AdminController) RequestDocuments(c *gin.Context) {
+    admin, ok := h.currentAdmin(c)
+    if !ok {
+        return
+    }
+
+    employerID, err := utils.ParseUintParam(c, "id")
+    if err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "invalid employer id", "id must be a number")
+        return
+    }
+
+    employer, err := h.findEmployerByID(employerID)
+    if err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "request failed", err.Error())
+        return
+    }
+    if employer == nil || employer.Approve == nil {
+        utils.JSONError(c, http.StatusNotFound, "employer not found", "employer has no approval record")
+        return
+    }
+
+    employer.Approve.Status = "request_document"
+    employer.Approve.AdminID = &admin.UserID
+    if err := h.db.Save(employer.Approve).Error; err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "request failed", err.Error())
+        return
+    }
+
+    notifyUser(h.db, employer.UserID, "ขอเอกสารยืนยันเพิ่มเติม", "employer_request_doc",
+        "กรุณาแนบเอกสารยืนยันตัวตนบริษัทของคุณเพิ่มเติม เพื่อประกอบการอนุมัติบัญชี")
+
+    utils.JSONSuccess(c, http.StatusOK, mapEmployerApprovalStatus(employer))
+}
+
 func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
     adminUserID, ok := utils.GetUserIDFromContext(c)
     if !ok {
@@ -185,7 +226,11 @@ func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
 
 func (h *AdminController) findEmployerByID(id uint) (*models.Employer, error) {
     var employer models.Employer
-    err := h.db.Preload("Approve").First(&employer, id).Error
+    err := h.db.
+        Preload("Approve").
+        Preload("AttachmentEmployer").
+        Where("user_id = ?", id).
+        First(&employer).Error
     if err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             return nil, nil
@@ -217,16 +262,30 @@ func mapEmployerApprovalToResponse(user *models.User, employer *models.Employer)
         dateOfSignUp = employer.Approve.DateOfSignUp
     }
 
+    companyRegis := ""
+    logo := ""
+    cardID := ""
+    if employer.AttachmentEmployer != nil {
+        companyRegis = employer.AttachmentEmployer.CompanyRegis
+        logo = employer.AttachmentEmployer.Logo
+        cardID = employer.AttachmentEmployer.CardID
+    }
+
     return dto.EmployerApprovalResponse{
         EmployerID:     employer.ID,
         UserID:         user.ID,
         Email:          user.Email,
+        Phone:          user.Phone,
         FirstName:      employer.FirstName,
         LastName:       employer.LastName,
+        Position:       employer.Position,
         CompanyName:    employer.CompanyName,
         BusinessType:   employer.BusinessType,
         TaxID:          employer.TaxID,
         CompanyAddress: employer.CompanyAddress,
+        CompanyRegis:   companyRegis,
+        Logo:           logo,
+        CardID:         cardID,
         Status:         status,
         DateOfSignUp:   dateOfSignUp,
     }

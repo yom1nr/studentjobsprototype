@@ -26,15 +26,18 @@ import CloseIcon from '@mui/icons-material/Close'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
 import HighlightOffIcon from '@mui/icons-material/HighlightOff'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
 import { ApiError } from '../../services/https'
-import { closeJobpost, createJobpost, listMyJobposts, listOpenJobposts, updateJobpost } from '../../services/https/jobposts'
+import { closeJobpost, createJobpost, deleteJobpost, listMyJobposts, listOpenJobposts, updateJobpost } from '../../services/https/jobposts'
+import { getMyEmployerProfile } from '../../services/https/employer'
 import { createApplication } from '../../services/https/applications'
 import type { Jobpost, UpsertJobpostRequest } from '../../interface/IJobInterface'
 
@@ -155,6 +158,18 @@ function OutcomeDialog({
   )
 }
 
+const BulletList = ({ text }: { text: string }) => {
+  if (!text) return null
+  const lines = text.split('\n').filter((l) => l.trim().length > 0)
+  return (
+    <Box component="ul" sx={{ margin: 0, paddingLeft: 2.5, color: colors.navy, fontSize: 14 }}>
+      {lines.map((line, i) => (
+        <li key={i}>{line.trim().replace(/^[-•]\s*/, '')}</li>
+      ))}
+    </Box>
+  )
+}
+
 function JobDetailDialog({
   job,
   onClose,
@@ -164,16 +179,16 @@ function JobDetailDialog({
   return (
     <Dialog open={job !== null} onClose={onClose} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
       {job && (
-        <Box sx={{ p: 3.5 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ p: 4 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>รายละเอียดงาน</Typography>
             <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
             <Box sx={{ width: 64, height: 64, borderRadius: '10px', bgcolor: colors.thumbBg, flexShrink: 0 }} />
             <Box>
-              <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>{job.position}</Typography>
+              <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>{job.position}</Typography>
               <Typography sx={{ fontSize: 14, color: colors.navy }}>{job.company_name}</Typography>
               {job.location && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
@@ -181,53 +196,67 @@ function JobDetailDialog({
                   <Typography sx={{ fontSize: 14, color: colors.navy }}>{job.location}</Typography>
                 </Box>
               )}
-              <Typography sx={{ fontSize: 14, color: colors.navy, fontWeight: 600, mt: 0.25 }}>{job.wage} บาท/ชั่วโมง</Typography>
+              <Typography sx={{ fontSize: 14, color: colors.navy, mt: 0.25 }}>รายชั่วโมง {job.wage} บาท</Typography>
             </Box>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-            {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px' }} />}
-            {job.period && <Chip label={job.period} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px' }} />}
+          <Box sx={{ mb: 3 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 1 }}>แท็ก</Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: '#E8F4FF', color: colors.navy, borderRadius: '5px', fontWeight: 500 }} />}
+            </Box>
           </Box>
 
-          {job.job_description && (
-            <Box sx={{ mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>ลักษณะงาน</Typography>
-              <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{job.job_description}</Typography>
-            </Box>
-          )}
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 4, rowGap: 3, mb: 4 }}>
+            {/* Left Column */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {job.job_description && (
+                <Box>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 1 }}>รายละเอียดงาน</Typography>
+                  <BulletList text={job.job_description} />
+                </Box>
+              )}
 
-          {job.property && (
-            <Box sx={{ mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>คุณสมบัติผู้สมัคร</Typography>
-              <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{job.property}</Typography>
-            </Box>
-          )}
+              {job.period && (
+                <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
+                    <AccessTimeOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
+                    <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>เวลาทำงาน</Typography>
+                  </Box>
+                  <BulletList text={job.period} />
+                </Box>
+              )}
 
-          {job.welfare && (
-            <Box sx={{ mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>สวัสดิการ</Typography>
-              <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{job.welfare}</Typography>
+              {job.welfare && (
+                <Box>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 1 }}>คุณสมบัติเพิ่มเติม</Typography>
+                  <BulletList text={job.welfare} />
+                </Box>
+              )}
             </Box>
-          )}
 
-          {job.date_start && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 3 }}>
-              <AccessTimeOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-              <Typography sx={{ fontSize: 13, color: colors.navy }}>
-                เริ่มงาน {new Date(job.date_start).toLocaleDateString('th-TH')}
-              </Typography>
+            {/* Right Column */}
+            <Box>
+              {job.property && (
+                <Box>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 1 }}>คุณสมบัติหลัก</Typography>
+                  <BulletList text={job.property} />
+                </Box>
+              )}
             </Box>
-          )}
+          </Box>
 
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={onApply}
-            sx={{ height: 52, borderRadius: '40px', textTransform: 'none', fontWeight: 600, fontSize: 16, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
-          >
-            {applyLabel}
-          </Button>
+          {/* Only show apply button if the user is a student or not logged in */}
+          {(!onApply || applyLabel === 'เข้าสู่ระบบเพื่อสมัครงาน' || applyLabel === 'ยื่นใบสมัครงาน') && (
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={onApply}
+              sx={{ height: 52, borderRadius: '40px', textTransform: 'none', fontWeight: 600, fontSize: 16, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
+            >
+              {applyLabel}
+            </Button>
+          )}
         </Box>
       )}
     </Dialog>
@@ -453,13 +482,10 @@ const EMPTY_JOB_FORM: JobFormState = {
   property: '',
   wage: '',
   quantity: 1,
-  dateStart: '',
-  timeStart: '',
   period: '',
 }
 
 function jobpostToForm(job: Jobpost): JobFormState {
-  const [datePart, timePart] = job.date_start ? job.date_start.split('T') : ['', '']
   return {
     position: job.position,
     jobType: job.job_type,
@@ -469,19 +495,17 @@ function jobpostToForm(job: Jobpost): JobFormState {
     property: job.property,
     wage: String(job.wage),
     quantity: job.quantity || 1,
-    dateStart: datePart,
-    timeStart: timePart ? timePart.slice(0, 5) : '',
+    dateStart: '',
+    timeStart: '',
     period: job.period,
   }
 }
 
 function formToPayload(form: JobFormState): UpsertJobpostRequest {
-  const dateStart = form.dateStart ? new Date(`${form.dateStart}T${form.timeStart || '00:00'}:00`).toISOString() : undefined
   return {
     position: form.position.trim(),
     job_type: form.jobType || undefined,
     job_description: form.jobDescription.trim() || undefined,
-    date_start: dateStart,
     wage: Number(form.wage) || 0,
     period: form.period.trim() || undefined,
     location: form.location.trim() || undefined,
@@ -505,6 +529,7 @@ function EmployerJobPostingsView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+  const [approveStatus, setApproveStatus] = useState<string | null>(null)
 
   const [mode, setMode] = useState<'list' | 'form'>('list')
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -512,6 +537,9 @@ function EmployerJobPostingsView() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [closingId, setClosingId] = useState<number | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [previewJob, setPreviewJob] = useState<Jobpost | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -520,8 +548,14 @@ function EmployerJobPostingsView() {
     async function load() {
       setLoading(true)
       try {
-        const data = await listMyJobposts(token!)
-        if (!cancelled) setJobs(data)
+        const [data, profile] = await Promise.all([
+          listMyJobposts(token!),
+          getMyEmployerProfile(token!).catch(() => null),
+        ])
+        if (!cancelled) {
+          setJobs(data)
+          if (profile) setApproveStatus(profile.approve_status)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'โหลดประกาศงานไม่สำเร็จ')
@@ -553,8 +587,17 @@ function EmployerJobPostingsView() {
 
   async function saveJob() {
     if (!token) return
-    if (form.position.trim().length === 0 || Number(form.wage) <= 0) {
-      setFormError('กรุณากรอกชื่อตำแหน่งงานและอัตราค่าตอบแทน')
+    const missingFields: string[] = []
+    if (!form.position.trim()) missingFields.push('ชื่อตำแหน่งงาน')
+    if (!form.jobType) missingFields.push('ประเภทงาน')
+    if (!form.location.trim()) missingFields.push('สถานที่ปฏิบัติงาน')
+    if (!form.welfare.trim()) missingFields.push('คุณสมบัติเพิ่มเติม')
+    if (!form.jobDescription.trim()) missingFields.push('รายละเอียดงาน')
+    if (!form.property.trim()) missingFields.push('คุณสมบัติหลัก')
+    if (!form.wage || Number(form.wage) <= 0) missingFields.push('อัตราค่าตอบแทน')
+    if (!form.period.trim()) missingFields.push('เวลาทำงาน')
+    if (missingFields.length > 0) {
+      setFormError(`กรุณากรอกข้อมูลให้ครบถ้วน: ${missingFields.join(', ')}`)
       return
     }
     setSaving(true)
@@ -588,11 +631,25 @@ function EmployerJobPostingsView() {
     }
   }
 
+  async function handleDelete(id: number) {
+    if (!token) return
+    setDeletingId(id)
+    try {
+      await deleteJobpost(token, id)
+      setJobs((prev) => prev.filter((j) => j.id !== id))
+    } catch {
+      setError('ลบประกาศไม่สำเร็จ')
+    } finally {
+      setDeletingId(null)
+      setDeleteConfirmId(null)
+    }
+  }
+
   if (mode === 'form') {
     return (
       <Box sx={{ maxWidth: 900, mx: 'auto' }}>
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 28, color: colors.navy, mb: 3 }}>
-          สร้าง/แก้ไขประกาศรับสมัครงาน
+          {editingId ? 'แก้ไขประกาศรับสมัครงาน' : 'สร้างประกาศรับสมัครงาน'}
         </Typography>
 
         <Box sx={{ border: '1px solid #E8E8E8', borderRadius: 4, p: 4 }}>
@@ -613,6 +670,7 @@ function EmployerJobPostingsView() {
                 label="ประเภทงาน"
                 value={form.jobType}
                 onChange={(e) => setForm({ ...form, jobType: e.target.value })}
+                required
                 fullWidth
               >
                 {EMPLOYER_JOB_TYPES.map((t) => (
@@ -620,46 +678,33 @@ function EmployerJobPostingsView() {
                 ))}
               </TextField>
               <TextField
-                label="ลักษณะงาน"
-                placeholder="อธิบายลักษณะงาน"
+                label="รายละเอียดงาน"
+                placeholder="ระบุรายละเอียดงาน..."
                 value={form.jobDescription}
                 onChange={(e) => setForm({ ...form, jobDescription: e.target.value })}
                 multiline
                 minRows={3}
+                required
                 fullWidth
               />
               <TextField
-                label="อัตราค่าตอบแทน"
-                placeholder="กรอกค่าตอบแทน"
+                label="อัตราค่าตอบแทน (รายชั่วโมง)"
+                placeholder="เช่น 60"
                 type="number"
                 value={form.wage}
                 onChange={(e) => setForm({ ...form, wage: e.target.value })}
                 required
                 fullWidth
-                slotProps={{ input: { endAdornment: <InputAdornment position="end">บาท/ชั่วโมง</InputAdornment> } }}
+                slotProps={{ input: { endAdornment: <InputAdornment position="end">บาท</InputAdornment> } }}
               />
-              <Box>
-                <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy, mb: 0.75 }}>วันและเวลาที่ปฏิบัติงาน</Typography>
-                <Box sx={{ display: 'flex', gap: 1.5 }}>
-                  <TextField
-                    type="date"
-                    value={form.dateStart}
-                    onChange={(e) => setForm({ ...form, dateStart: e.target.value })}
-                    fullWidth
-                  />
-                  <TextField
-                    type="time"
-                    value={form.timeStart}
-                    onChange={(e) => setForm({ ...form, timeStart: e.target.value })}
-                    fullWidth
-                  />
-                </Box>
-              </Box>
               <TextField
-                label="ระยะเวลาจ้าง"
-                placeholder="เช่น 3 เดือน"
+                label="เวลาทำงาน"
+                placeholder="เช่น จันทร์ - ศุกร์ 17:00 - 23:00 (เลือกวันทำงานได้)"
                 value={form.period}
                 onChange={(e) => setForm({ ...form, period: e.target.value })}
+                multiline
+                minRows={2}
+                required
                 fullWidth
               />
             </Box>
@@ -667,25 +712,30 @@ function EmployerJobPostingsView() {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
               <TextField
                 label="สถานที่ปฏิบัติงาน"
-                placeholder="เช่น กรุงเทพมหานคร"
+                placeholder="เช่น ประตู4, มทส"
                 value={form.location}
                 onChange={(e) => setForm({ ...form, location: e.target.value })}
+                required
                 fullWidth
               />
               <TextField
-                label="สวัสดิการ"
-                placeholder="เช่น ค่าอาหาร, โบนัส"
+                label="คุณสมบัติเพิ่มเติม"
+                placeholder="เช่น ตรงต่อเวลา, บุคลิกภาพดี"
                 value={form.welfare}
                 onChange={(e) => setForm({ ...form, welfare: e.target.value })}
                 multiline
                 minRows={3}
+                required
                 fullWidth
               />
               <TextField
-                label="คุณสมบัติผู้สมัคร"
-                placeholder="ระบุคุณสมบัติของผู้สมัคร"
+                label="คุณสมบัติหลัก"
+                placeholder="เช่น อายุ 18 ปีขึ้น, เพศชาย"
                 value={form.property}
                 onChange={(e) => setForm({ ...form, property: e.target.value })}
+                multiline
+                minRows={3}
+                required
                 fullWidth
               />
               <Box>
@@ -752,6 +802,7 @@ function EmployerJobPostingsView() {
   }
 
   return (
+    <>
     <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
       <ErrorAlert message={error} />
 
@@ -759,14 +810,22 @@ function EmployerJobPostingsView() {
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 28, color: colors.navy }}>
           ประกาศงานของฉัน
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={startCreate}
-          sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: '#0088FF', px: 2.5, '&:hover': { bgcolor: '#0070D6' } }}
-        >
-          สร้างประกาศงานใหม่
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {approveStatus && approveStatus !== 'approved' && (
+            <Typography sx={{ color: '#DA1E28', fontSize: 13, fontWeight: 600 }}>
+              ไม่สามารถสร้างประกาศงานได้ เนื่องจากบัญชียังไม่ได้รับการอนุมัติ
+            </Typography>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={startCreate}
+            disabled={approveStatus !== 'approved'}
+            sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: '#0088FF', px: 2.5, '&:hover': { bgcolor: '#0070D6' } }}
+          >
+            สร้างประกาศงานใหม่
+          </Button>
+        </Box>
       </Box>
 
       {loading ? (
@@ -796,6 +855,9 @@ function EmployerJobPostingsView() {
                     </TableCell>
                     <TableCell align="right">
                       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                        <IconButton size="small" onClick={() => setPreviewJob(job)} sx={{ border: '1px solid #D9D9D9', borderRadius: 1.5 }}>
+                          <VisibilityOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
+                        </IconButton>
                         <IconButton size="small" onClick={() => startEdit(job)} sx={{ border: '1px solid #D9D9D9', borderRadius: 1.5 }}>
                           <EditOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
                         </IconButton>
@@ -807,6 +869,14 @@ function EmployerJobPostingsView() {
                         >
                           ปิดรับสมัคร
                         </Button>
+                        <IconButton
+                          size="small"
+                          disabled={deletingId === job.id}
+                          onClick={() => setDeleteConfirmId(job.id)}
+                          sx={{ border: '1px solid #FFCDD2', borderRadius: 1.5, bgcolor: '#FFF0F0', '&:hover': { bgcolor: '#FFCDD2' } }}
+                        >
+                          <DeleteOutlinedIcon fontSize="small" sx={{ color: '#DA1E28' }} />
+                        </IconButton>
                       </Box>
                     </TableCell>
                   </TableRow>
@@ -824,6 +894,51 @@ function EmployerJobPostingsView() {
         </Box>
       )}
     </Box>
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        maxWidth="xs"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 4 } } }}
+      >
+        <Box sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>ยืนยันการลบ</Typography>
+            <IconButton size="small" onClick={() => setDeleteConfirmId(null)}><CloseIcon /></IconButton>
+          </Box>
+          <Typography sx={{ fontSize: 14, color: '#52545C', mb: 3 }}>
+            คุณแน่ใจว่าต้องการลบประกาศงานนี้ใช่หรือไม่? การดำเนินการนี้ไม่สามารถย้อนกลับได้
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Button
+              fullWidth
+              onClick={() => setDeleteConfirmId(null)}
+              sx={{ borderRadius: '40px', textTransform: 'none', bgcolor: '#F0F0F0', color: colors.navy, '&:hover': { bgcolor: '#E4E4E4' } }}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={deletingId !== null}
+              onClick={() => deleteConfirmId !== null && void handleDelete(deleteConfirmId)}
+              sx={{ borderRadius: '40px', textTransform: 'none', bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B71C1C' } }}
+            >
+              {deletingId !== null ? 'กำลังลบ…' : 'ลบประกาศ'}
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
+
+      <JobDetailDialog
+        job={previewJob}
+        onClose={() => setPreviewJob(null)}
+        onApply={() => {}}
+        applyLabel="preview"
+      />
+    </>
   )
 }
 

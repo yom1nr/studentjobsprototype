@@ -82,7 +82,7 @@ func (h *NotificationController) MarkRead(c *gin.Context) {
     }
 
     result := h.db.Model(&models.Notification{}).
-        Where("id = ? AND user_id = ?", notificationID, userID).
+        Where("notification_id = ? AND user_id = ?", notificationID, userID).
         Update("is_read", true)
     if result.Error != nil {
         utils.JSONError(c, http.StatusInternalServerError, "failed to update notification", result.Error.Error())

@@ -28,10 +28,10 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(() => localStorage.getItem('remembered_email') || '')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [rememberMe, setRememberMe] = useState(false)
+  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('remembered_email') !== null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,7 +43,12 @@ export default function LoginPage() {
     setSubmitting(true)
 
     try {
-      await login({ email: email.trim(), password })
+      await login({ email: email.trim(), password }, rememberMe)
+      if (rememberMe) {
+        localStorage.setItem('remembered_email', email.trim())
+      } else {
+        localStorage.removeItem('remembered_email')
+      }
       navigate('/profile', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {

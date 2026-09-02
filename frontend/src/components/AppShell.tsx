@@ -333,6 +333,7 @@ function AppShellInner() {
             }}
           >
             <Avatar
+              src={user?.profile_picture}
               sx={{
                 width: 34,
                 height: 34,

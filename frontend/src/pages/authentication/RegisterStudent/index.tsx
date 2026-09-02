@@ -1,4 +1,4 @@
-import { useState, type SyntheticEvent } from 'react'
+import { useState, useRef, type SyntheticEvent } from 'react'
 import {
   Box,
   Button,
@@ -18,12 +18,12 @@ import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined'
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined'
 import PhoneOutlinedIcon from '@mui/icons-material/PhoneOutlined'
-import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../../../services/https'
 import { ErrorAlert } from '../../../components/ErrorAlert'
 import { useAuth } from '../../../auth/useAuth'
 import { upsertMyStudentProfile } from '../../../services/https/student'
+import { UploadCard } from '../../../components/UploadCard'
 
 const colors = { navy: '#000349', bg: '#DAEAF7' }
 
@@ -36,7 +36,7 @@ type FormState = {
   firstName: string
   lastName: string
   gender: string
-  age: string
+  dob: string
   address: string
   university: string
   faculty: string
@@ -44,6 +44,10 @@ type FormState = {
   year: string
   phone: string
   skills: string
+  profilePicture: string
+  schedule: string
+  transcript: string
+  resume: string
 }
 
 const INITIAL: FormState = {
@@ -55,7 +59,7 @@ const INITIAL: FormState = {
   firstName: '',
   lastName: '',
   gender: '',
-  age: '',
+  dob: '',
   address: '',
   university: '',
   faculty: '',
@@ -63,45 +67,26 @@ const INITIAL: FormState = {
   year: '',
   phone: '',
   skills: '',
+  profilePicture: '',
+  schedule: '',
+  transcript: '',
+  resume: '',
 }
 
-function UploadSlot({ label }: Readonly<{ label: string }>) {
-  return (
-    <Box>
-      <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.75 }}>{label}</Typography>
-      <Box
-        component="label"
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1.5,
-          border: '1.5px dashed #B9C6DC',
-          borderRadius: 3,
-          p: 2,
-          cursor: 'pointer',
-          '&:hover': { bgcolor: '#F7FAFF' },
-        }}
-      >
-        <input type="file" accept=".pdf,.jpg,.jpeg,.png" hidden />
-        <CloudUploadOutlinedIcon sx={{ color: colors.navy }} />
-        <Box>
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>คลิกเพื่อเลือกไฟล์</Typography>
-          <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)</Typography>
-        </Box>
-      </Box>
-    </Box>
-  )
-}
+
 
 export default function RegisterStudentPage() {
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, refreshProfile } = useAuth()
+  const dobRef = useRef<HTMLInputElement>(null)
 
   const [step, setStep] = useState(1)
   const [form, setForm] = useState(INITIAL)
   const [agreed, setAgreed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  const maxDate = new Date().toISOString().split('T')[0]
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -112,6 +97,8 @@ export default function RegisterStudentPage() {
     form.userName.trim().length >= 2 &&
     form.email.trim().length > 0 &&
     form.password.length >= 8 &&
+    /[a-zA-Z]/.test(form.password) &&
+    /[0-9]/.test(form.password) &&
     form.password === form.confirmPassword
 
   const step2Valid =
@@ -137,13 +124,19 @@ export default function RegisterStudentPage() {
       await upsertMyStudentProfile(token, {
         first_name: form.firstName.trim(),
         last_name: form.lastName.trim(),
+        date_of_birth: form.dob || undefined,
         address: form.address.trim() || undefined,
         university: form.university.trim() || undefined,
         faculty: form.faculty.trim() || undefined,
         major: form.major.trim() || undefined,
         years: form.year.trim() || undefined,
         skill: form.skills.trim() || undefined,
+        profile_picture: form.profilePicture || undefined,
+        schedule: form.schedule || undefined,
+        transcript: form.transcript || undefined,
+        resume: form.resume || undefined,
       })
+      await refreshProfile()
       navigate('/profile', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -268,7 +261,41 @@ export default function RegisterStudentPage() {
                 <MenuItem value="female">หญิง</MenuItem>
                 <MenuItem value="other">อื่น ๆ</MenuItem>
               </TextField>
-              <TextField label="อายุ" type="number" value={form.age} onChange={(e) => set('age', e.target.value)} placeholder="กรอกอายุ" fullWidth />
+              <Box sx={{ position: 'relative', width: '100%' }} onClick={() => dobRef.current?.showPicker()}>
+                <TextField 
+                  label="อายุ" 
+                  value={form.dob ? (() => {
+                    const today = new Date()
+                    const birthDate = new Date(form.dob)
+                    let age = today.getFullYear() - birthDate.getFullYear()
+                    const m = today.getMonth() - birthDate.getMonth()
+                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                      age--
+                    }
+                    return Math.max(0, age).toString()
+                  })() : ''}
+                  placeholder="เลือกวันเกิด"
+                  fullWidth
+                  slotProps={{
+                    input: {
+                      readOnly: true,
+                      endAdornment: <CalendarMonthOutlinedIcon sx={{ color: colors.navy }} />,
+                    }
+                  }}
+                />
+                <input 
+                  ref={dobRef}
+                  type="date" 
+                  value={form.dob}
+                  max={maxDate}
+                  onChange={(e) => set('dob', e.target.value)}
+                  style={{ 
+                    position: 'absolute', 
+                    top: 0, left: 0, width: '100%', height: '100%', 
+                    opacity: 0, cursor: 'pointer' 
+                  }} 
+                />
+              </Box>
               <TextField
                 label="ที่อยู่"
                 value={form.address}
@@ -339,11 +366,11 @@ export default function RegisterStudentPage() {
                 />
               </Box>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                <UploadSlot label="รูปโปรไฟล์" />
-                <UploadSlot label="อัปโหลด ตารางเรียน" />
+                <UploadCard label="รูปโปรไฟล์" camera value={form.profilePicture} onUpload={(url) => set('profilePicture', url)} />
+                <UploadCard label="อัปโหลด ตารางเรียน" value={form.schedule} onUpload={(url) => set('schedule', url)} />
               </Box>
-              <UploadSlot label="อัปโหลด เรซูเม่" />
-              <UploadSlot label="อัปโหลด เกรด" />
+              <UploadCard label="อัปโหลด เรซูเม่" value={form.resume} onUpload={(url) => set('resume', url)} />
+              <UploadCard label="อัปโหลด เกรด" value={form.transcript} onUpload={(url) => set('transcript', url)} />
             </Box>
 
             <FormControlLabel

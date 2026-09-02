@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, Typography } from '@mui/material'
+import { Alert, Box, Button, Typography, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined'
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined'
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined'
@@ -34,6 +34,11 @@ const TYPE_PRESENTATION: Record<string, { icon: React.ReactNode; actionLabel: st
     actionLabel: 'ดูข้อมูลบัญชี',
     actionPath: '/settings',
   },
+  employer_request_doc: {
+    icon: <ReportProblemOutlinedIcon sx={{ color: '#F1C21B' }} />,
+    actionLabel: 'แนบเอกสารเพิ่มเติม',
+    actionPath: '/settings',
+  },
 }
 
 function formatRelativeTime(iso: string): string {
@@ -58,6 +63,7 @@ export default function NotificationsPage() {
   const [tab, setTab] = useState<Tab>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [readingItem, setReadingItem] = useState<NotificationItem | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -158,7 +164,23 @@ export default function NotificationsPage() {
           {filtered.map((n) => {
             const presentation = TYPE_PRESENTATION[n.notification_type]
             return (
-              <Box key={n.id} sx={{ display: 'flex', gap: 2, p: 2.5, borderRadius: 3, border: `1px solid ${colors.border}`, bgcolor: !n.is_read ? '#F7FAFF' : 'transparent' }}>
+              <Box
+                key={n.id}
+                onClick={() => {
+                  if (!n.is_read) void markRead(n.id)
+                  setReadingItem(n)
+                }}
+                sx={{
+                  display: 'flex',
+                  gap: 2,
+                  p: 2.5,
+                  borderRadius: 3,
+                  border: `1px solid ${colors.border}`,
+                  bgcolor: !n.is_read ? '#F7FAFF' : 'transparent',
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: !n.is_read ? '#EBF2FF' : '#F9F9F9' }
+                }}
+              >
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: '50%', bgcolor: '#F2F4F8', flexShrink: 0 }}>
                   {presentation?.icon ?? <NotificationsNoneOutlinedIcon sx={{ color: colors.navy }} />}
                 </Box>
@@ -170,28 +192,30 @@ export default function NotificationsPage() {
                       {!n.is_read && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#0F62FE' }} />}
                     </Box>
                   </Box>
-                  <Typography sx={{ fontSize: 13, color: '#52545C', mt: 0.25, mb: presentation ? 1 : 0 }}>{n.message}</Typography>
-                  {presentation && (
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        if (!n.is_read) void markRead(n.id)
-                        navigate(presentation.actionPath)
-                      }}
-                      sx={{ bgcolor: colors.navy, color: '#fff', textTransform: 'none', borderRadius: '20px', px: 2, '&:hover': { bgcolor: '#000226' } }}
-                    >
-                      {presentation.actionLabel} →
-                    </Button>
-                  )}
-                  {!presentation && !n.is_read && (
-                    <Button
-                      size="small"
-                      onClick={() => void markRead(n.id)}
-                      sx={{ color: colors.navy, textTransform: 'none', px: 0, minWidth: 0 }}
-                    >
-                      ทำเครื่องหมายว่าอ่านแล้ว
-                    </Button>
-                  )}
+                  <Typography
+                    sx={{
+                      fontSize: 13,
+                      color: '#52545C',
+                      mt: 0.25,
+                      mb: 1,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {n.message}
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      if (!n.is_read) void markRead(n.id)
+                      setReadingItem(n)
+                    }}
+                    sx={{ bgcolor: '#F0F0F0', color: colors.navy, textTransform: 'none', borderRadius: '20px', px: 2, '&:hover': { bgcolor: '#E4E4E4' } }}
+                  >
+                    อ่านรายละเอียด
+                  </Button>
                 </Box>
               </Box>
             )
@@ -199,6 +223,32 @@ export default function NotificationsPage() {
           {filtered.length === 0 && <Typography sx={{ color: '#697077', textAlign: 'center', py: 4 }}>ไม่มีการแจ้งเตือน</Typography>}
         </Box>
       )}
+
+      <Dialog open={!!readingItem} onClose={() => setReadingItem(null)} maxWidth="sm" fullWidth>
+        {readingItem && (
+          <>
+            <DialogTitle sx={{ fontWeight: 700, color: colors.navy }}>{readingItem.title}</DialogTitle>
+            <DialogContent>
+              <Typography sx={{ color: '#52545C', mb: 2, whiteSpace: 'pre-wrap' }}>{readingItem.message}</Typography>
+            </DialogContent>
+            <DialogActions sx={{ p: 2, pt: 0 }}>
+              <Button onClick={() => setReadingItem(null)} sx={{ color: '#697077', textTransform: 'none' }}>ปิด</Button>
+              {TYPE_PRESENTATION[readingItem.notification_type] && (
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    navigate(TYPE_PRESENTATION[readingItem.notification_type].actionPath)
+                    setReadingItem(null)
+                  }}
+                  sx={{ bgcolor: colors.navy, textTransform: 'none', borderRadius: '20px', px: 2, '&:hover': { bgcolor: '#000226' } }}
+                >
+                  {TYPE_PRESENTATION[readingItem.notification_type].actionLabel}
+                </Button>
+              )}
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Box>
   )
 }

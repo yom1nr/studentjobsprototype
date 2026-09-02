@@ -9,7 +9,7 @@ export type AuthState = {
 }
 
 export type AuthContextValue = AuthState & {
-  login: (payload: LoginRequest) => Promise<void>
+  login: (payload: LoginRequest, remember?: boolean) => Promise<void>
   // Returns the freshly-issued token so a caller can immediately make an
   // authenticated follow-up request (e.g. submitting an employer profile
   // right after registering) without waiting for a re-render to pick up

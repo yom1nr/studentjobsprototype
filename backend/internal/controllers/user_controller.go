@@ -114,8 +114,13 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
     if payload.Gender != "" {
         user.Gender = payload.Gender
     }
+<<<<<<< Updated upstream
     if payload.Role != "" {
         user.Role = payload.Role
+=======
+    if payload.ProfilePicture != "" {
+        user.ProfilePicture = payload.ProfilePicture
+>>>>>>> Stashed changes
     }
 
     user.UpdatedAt = time.Now().UTC()
@@ -228,6 +233,7 @@ func mapUserToResponse(user *models.User) *dto.UserResponse {
         Phone:     user.Phone,
         Gender:    user.Gender,
         Role:      user.Role,
+        ProfilePicture: user.ProfilePicture,
         CreatedAt: user.CreatedAt.Format(time.RFC3339),
         UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
     }

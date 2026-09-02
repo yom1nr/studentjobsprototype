@@ -19,11 +19,12 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
 import { ApiError } from '../../services/https'
-import { listEmployerApplications, listMyApplications, reviewApplication } from '../../services/https/applications'
+import { deleteApplication, listEmployerApplications, listMyApplications, reviewApplication } from '../../services/https/applications'
 import type { Application } from '../../interface/IJobInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6' }
@@ -151,6 +152,13 @@ function EmployerApplicationsView() {
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [successOpen, setSuccessOpen] = useState(false)
+  // Which decision the success dialog should report — the review screen offers
+  // both outcomes, so the confirmation has to match what was actually saved.
+  const [decision, setDecision] = useState<'accepted' | 'rejected'>('accepted')
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Application | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -208,12 +216,15 @@ function EmployerApplicationsView() {
     }
   }
 
-  async function confirmSave() {
+  async function submitReview(resultStatus: 'accepted' | 'rejected', comment?: string) {
     if (!token || !selected) return
     setSubmitting(true)
     setActionError(null)
     try {
-      await reviewApplication(token, selected.id, { result_status: 'accepted' })
+      await reviewApplication(token, selected.id, { result_status: resultStatus, comment })
+      setDecision(resultStatus)
+      setRejectOpen(false)
+      setRejectReason('')
       setSuccessOpen(true)
     } catch (err) {
       setActionError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกไม่สำเร็จ')
@@ -227,6 +238,22 @@ function EmployerApplicationsView() {
     setView('list')
     setSelected(null)
     setReloadToken((t) => t + 1)
+  }
+
+  async function handleDelete() {
+    if (!token || !deleteTarget) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteApplication(token, deleteTarget.id)
+      setDeleteTarget(null)
+      setReloadToken((t) => t + 1)
+    } catch (err) {
+      setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'ลบใบสมัครไม่สำเร็จ')
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   if (view === 'detail' && selected) {
@@ -281,7 +308,7 @@ function EmployerApplicationsView() {
               onClick={() => setView('checklist')}
               sx={{ borderRadius: '40px', textTransform: 'none', px: 3, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
             >
-              บันทึกข้อมูล
+              พิจารณาใบสมัคร
             </Button>
           </Box>
         ) : (
@@ -323,7 +350,7 @@ function EmployerApplicationsView() {
     return (
       <Box sx={{ maxWidth: 800, mx: 'auto' }}>
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 26, color: colors.navy, mb: 3 }}>
-          ตรวจสอบข้อมูล
+          สรุปผลการพิจารณาใบสมัคร
         </Typography>
 
         <ErrorAlert message={actionError} />
@@ -340,9 +367,31 @@ function EmployerApplicationsView() {
           ))}
         </Box>
 
-        <Box sx={{ bgcolor: '#EAF7EA', border: '1px solid #C7E8C9', borderRadius: 3, p: 2.5, display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
-          <CheckCircleIcon sx={{ color: '#2E7D32' }} />
-          <Typography sx={{ fontWeight: 700, color: '#217829' }}>ข้อมูลครบถ้วน พร้อมบันทึก</Typography>
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3, mb: 3 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>ผลการพิจารณาใบสมัคร</Typography>
+          <Typography sx={{ fontSize: 13, color: '#697077', mb: 2.5 }}>
+            เลือกผลการพิจารณาของ {selected.student_name || 'ผู้สมัครรายนี้'} — ถ้าผ่าน รายชื่อจะไปอยู่ในกลุ่ม
+            &quot;ยังไม่นัดสัมภาษณ์&quot; ที่เมนู &quot;จัดการนัดหมายสัมภาษณ์&quot; เพื่อนัดหมายต่อไป
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+            <Button
+              variant="contained"
+              disabled={submitting}
+              onClick={() => void submitReview('accepted')}
+              startIcon={<CheckCircleIcon />}
+              sx={{ borderRadius: '40px', textTransform: 'none', px: 3, fontWeight: 600, bgcolor: '#217829', '&:hover': { bgcolor: '#1B5F21' } }}
+            >
+              {submitting ? 'กำลังบันทึก…' : 'ผ่านการพิจารณา'}
+            </Button>
+            <Button
+              variant="outlined"
+              disabled={submitting}
+              onClick={() => { setRejectReason(''); setActionError(null); setRejectOpen(true) }}
+              sx={{ borderRadius: '40px', textTransform: 'none', px: 3, fontWeight: 600, color: '#DA1E28', borderColor: '#DA1E28' }}
+            >
+              ไม่ผ่านการพิจารณา
+            </Button>
+          </Box>
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
@@ -350,23 +399,56 @@ function EmployerApplicationsView() {
             onClick={() => setView('detail')}
             sx={{ borderRadius: '40px', textTransform: 'none', px: 3, color: colors.navy, bgcolor: '#F0F0F0', '&:hover': { bgcolor: '#E4E4E4' } }}
           >
-            แก้ไขข้อมูล
-          </Button>
-          <Button
-            variant="contained"
-            disabled={submitting}
-            onClick={() => void confirmSave()}
-            sx={{ borderRadius: '40px', textTransform: 'none', px: 3, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
-          >
-            {submitting ? 'กำลังบันทึก…' : 'บันทึกข้อมูล'}
+            ย้อนกลับ
           </Button>
         </Box>
 
+        <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+          <Box sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy }}>ไม่ผ่านการพิจารณา</Typography>
+              <IconButton size="small" onClick={() => setRejectOpen(false)}><CloseOutlinedIcon /></IconButton>
+            </Box>
+            <Typography sx={{ fontSize: 13, color: '#697077', mb: 2 }}>
+              ระบุเหตุผลเพื่อแจ้งให้ผู้สมัครทราบ — การบันทึกผลนี้ไม่สามารถย้อนกลับได้
+            </Typography>
+            <TextField
+              label="เหตุผลที่ไม่ผ่านการพิจารณา"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="เช่น คุณสมบัติยังไม่ตรงกับตำแหน่งที่เปิดรับ"
+              fullWidth
+              multiline
+              minRows={3}
+              sx={{ mb: 2 }}
+            />
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={rejectReason.trim().length === 0 || submitting}
+              onClick={() => void submitReview('rejected', rejectReason.trim())}
+              sx={{ height: 48, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
+            >
+              {submitting ? 'กำลังบันทึก…' : 'ยืนยันผลไม่ผ่าน'}
+            </Button>
+          </Box>
+        </Dialog>
+
         <Dialog open={successOpen} onClose={closeSuccess} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
           <Box sx={{ p: 4, textAlign: 'center' }}>
-            <DescriptionOutlinedIcon sx={{ fontSize: 72, color: colors.navy }} />
-            <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mt: 2 }}>ส่งให้เจ้าหน้าที่ตรวจสอบเรียบร้อย</Typography>
-            <Typography sx={{ fontSize: 14, color: '#697077', mt: 0.5, mb: 3 }}>กำลังรอเจ้าหน้าที่ตรวจสอบข้อมูล</Typography>
+            {decision === 'accepted' ? (
+              <CheckCircleIcon sx={{ fontSize: 72, color: '#2E7D32' }} />
+            ) : (
+              <DescriptionOutlinedIcon sx={{ fontSize: 72, color: '#9AA0A6' }} />
+            )}
+            <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mt: 2 }}>
+              {decision === 'accepted' ? 'บันทึกผลผ่านการพิจารณาแล้ว' : 'บันทึกผลไม่ผ่านการพิจารณาแล้ว'}
+            </Typography>
+            <Typography sx={{ fontSize: 14, color: '#697077', mt: 0.5, mb: 3 }}>
+              {decision === 'accepted'
+                ? 'รายชื่อผู้สมัครไปอยู่ในกลุ่ม "ยังไม่นัดสัมภาษณ์" ที่เมนู "จัดการนัดหมายสัมภาษณ์" แล้ว'
+                : 'ระบบแจ้งผลให้ผู้สมัครทราบเรียบร้อยแล้ว'}
+            </Typography>
             <Button
               onClick={closeSuccess}
               sx={{ borderRadius: '40px', textTransform: 'none', px: 4, color: colors.navy, bgcolor: '#F0F0F0', '&:hover': { bgcolor: '#E4E4E4' } }}
@@ -410,7 +492,7 @@ function EmployerApplicationsView() {
         <Alert severity="info">กำลังโหลดข้อมูล…</Alert>
       ) : (
         <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '130px 1fr 1fr 130px 140px 60px', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '130px 1fr 1fr 130px 140px 110px', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
             {['รหัสใบสมัคร', 'นักศึกษา', 'ตำแหน่งงาน', 'วันที่สมัคร', 'สถานะ', ''].map((h) => (
               <Typography key={h} sx={{ fontSize: 12, fontWeight: 700, color: '#697077' }}>{h}</Typography>
             ))}
@@ -422,7 +504,7 @@ function EmployerApplicationsView() {
                 key={app.id}
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: '130px 1fr 1fr 130px 140px 60px',
+                  gridTemplateColumns: '130px 1fr 1fr 130px 140px 110px',
                   alignItems: 'center',
                   px: 2.5,
                   py: 1.75,
@@ -434,9 +516,14 @@ function EmployerApplicationsView() {
                 <Typography sx={{ fontSize: 14, color: '#52545C' }}>{app.position}</Typography>
                 <Typography sx={{ fontSize: 13, color: '#697077' }}>{new Date(app.apply_date).toLocaleDateString('th-TH')}</Typography>
                 <Chip label={status.label} size="small" sx={{ bgcolor: status.bg, color: status.color, fontWeight: 600, width: 'fit-content' }} />
-                <IconButton size="small" onClick={() => openDetail(app)} sx={{ border: `1px solid ${colors.border}`, borderRadius: 1.5 }}>
-                  <VisibilityOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-                </IconButton>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <IconButton size="small" title="ดูรายละเอียด" onClick={() => openDetail(app)} sx={{ border: `1px solid ${colors.border}`, borderRadius: 1.5 }}>
+                    <VisibilityOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
+                  </IconButton>
+                  <IconButton size="small" title="ลบใบสมัคร" onClick={() => setDeleteTarget(app)} sx={{ border: '1px solid #F3C2C4', borderRadius: 1.5 }}>
+                    <DeleteOutlineIcon fontSize="small" sx={{ color: '#DA1E28' }} />
+                  </IconButton>
+                </Box>
               </Box>
             )
           })}
@@ -445,6 +532,33 @@ function EmployerApplicationsView() {
           )}
         </Box>
       )}
+
+      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3.5 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mb: 1 }}>ลบใบสมัครนี้?</Typography>
+          <Typography sx={{ fontSize: 14, color: '#52545C', mb: 1.5 }}>
+            {deleteTarget ? `${applicationCode(deleteTarget.id)} — ${deleteTarget.student_name || 'ไม่ระบุชื่อ'} (${deleteTarget.position})` : ''}
+          </Typography>
+          <Box sx={{ bgcolor: '#FDEAEA', color: '#B3261E', fontSize: 13, borderRadius: 2, p: 1.5, mb: 2.5 }}>
+            ประวัติการพิจารณา และนัดสัมภาษณ์ของใบสมัครนี้ จะถูกลบไปด้วย — ย้อนกลับไม่ได้
+            <br />
+            ถ้าแค่ไม่รับผู้สมัครคนนี้ ให้เลือก &quot;ไม่ผ่านการพิจารณา&quot; แทน เพื่อเก็บเป็นหลักฐาน
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
+            <Button onClick={() => setDeleteTarget(null)} sx={{ textTransform: 'none', borderRadius: '40px', px: 3, color: colors.navy, bgcolor: '#F0F0F0' }}>
+              ยกเลิก
+            </Button>
+            <Button
+              variant="contained"
+              disabled={deleting}
+              onClick={() => void handleDelete()}
+              sx={{ textTransform: 'none', borderRadius: '40px', px: 3, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
+            >
+              {deleting ? 'กำลังลบ…' : 'ลบใบสมัคร'}
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
     </Box>
   )
 }

@@ -10,6 +10,9 @@ export type RescheduleEntry = {
 
 export type InterviewScheduleRecord = {
   id: number
+  /** Which application this appointment is for. Null on rows created before
+   *  interviews were tied to an application. */
+  application_id: number | null
   student_id: number
   student_name: string
   employer_id: number
@@ -19,12 +22,14 @@ export type InterviewScheduleRecord = {
   appointment_time: string
   location: string
   preparation_details: string
+  status: string
+  result: string
   created_at: string
   reschedules?: RescheduleEntry[]
 }
 
 export type CreateInterviewRequest = {
-  student_id: number
+  application_id: number
   interview_format: InterviewFormat
   appointment_date: string
   appointment_time: string
@@ -32,7 +37,9 @@ export type CreateInterviewRequest = {
   preparation_details?: string
 }
 
-export type UpdateInterviewRequest = CreateInterviewRequest
+/** Editing only changes the appointment details — which application it belongs
+ *  to is fixed when it is created. */
+export type UpdateInterviewRequest = Omit<CreateInterviewRequest, 'application_id'>
 
 export type RequestRescheduleRequest = {
   reason: string

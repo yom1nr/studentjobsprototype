@@ -51,6 +51,7 @@ func SetupRouter(
     employer.POST("/jobposts", jobpostHandler.CreateJobpost)
     employer.PUT("/jobposts/:id", jobpostHandler.UpdateJobpost)
     employer.POST("/jobposts/:id/close", jobpostHandler.CloseJobpost)
+    employer.DELETE("/jobposts/:id", jobpostHandler.DeleteJobpost)
 
     // Job posts — public browsing (no login required; only applying needs an account)
     jobposts := api.Group("/jobposts")
@@ -69,6 +70,7 @@ func SetupRouter(
     employer.GET("/applications", applicationHandler.ListEmployerApplications)
     employer.GET("/applications/:id", applicationHandler.GetEmployerApplicationDetail)
     employer.POST("/applications/:id/review", applicationHandler.ReviewApplication)
+    employer.DELETE("/applications/:id", applicationHandler.DeleteApplication)
 
     // Employer: interview scheduling (B6733827 subsystem 1)
     employer.POST("/interviews", interviewHandler.CreateInterview)

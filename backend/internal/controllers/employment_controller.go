@@ -49,16 +49,49 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 		return
 	}
 
+	// An agreement may only be drafted for a student who has passed an interview
+	// with this employer — hiring can't skip straight past the interview step.
+	var passedInterview models.InterviewSchedule
+	err := h.db.Where("student_id = ? AND employer_id = ? AND result = ?", student.UserID, employer.UserID, "passed").
+		First(&passedInterview).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.JSONError(c, http.StatusBadRequest, "create failed", "this student must pass an interview with you before you can send an employment agreement")
+		} else {
+			utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		}
+		return
+	}
+
+	// One live agreement per student: a second pending draft would leave the
+	// student two contracts to answer, and re-hiring someone already working for
+	// you is a different action. A rejected one may be replaced.
+	var live models.EmploymentAgreement
+	err = h.db.Where("student_id = ? AND employer_id = ? AND status IN ?", student.UserID, employer.UserID, []string{"pending", "accepted"}).
+		First(&live).Error
+	if err == nil {
+		utils.JSONError(c, http.StatusBadRequest, "create failed", "this student already has an active employment agreement with you")
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		return
+	}
+
 	start, err := time.Parse("2006-01-02", payload.StartDate)
 	if err != nil {
 		utils.JSONError(c, http.StatusBadRequest, "invalid start_date", "expected format YYYY-MM-DD")
 		return
 	}
 
+	// Record which interview this agreement came out of. The field existed but
+	// was never filled, so every agreement looked unrelated to any interview —
+	// which meant nothing downstream could tell a hire from a stray record.
+	interviewID := passedInterview.InterviewID
 	agreement := &models.EmploymentAgreement{
-		StudentID:       student.UserID,
-		EmployerID:      employer.UserID,
-		StartDate:       &start,
+		StudentID:           student.UserID,
+		EmployerID:          employer.UserID,
+		InterviewScheduleID: &interviewID,
+		StartDate:           &start,
 		WageRate:        payload.WageRate,
 		DurationMonths:  payload.DurationMonths,
 		WorkingHours:    payload.WorkingHours,

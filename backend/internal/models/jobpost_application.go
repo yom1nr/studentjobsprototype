@@ -23,8 +23,10 @@ type Jobpost struct {
 	Quantity        int       `gorm:"default:1" json:"quantity"`
 	Status          string    `gorm:"size:50;not null;default:'open'" json:"status"` // open | closed | draft
 
-	// Relations
-	User         *User         `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	// Relations. User is left to convention for the same reason as Application.Jobpost
+	// below — User's primary key is also named UserID, so naming the foreign key here
+	// would make GORM read this as a has-one and join on the wrong column.
+	User         *User         `json:"user,omitempty"`
 	Applications []Application `gorm:"foreignKey:JobpostID" json:"applications,omitempty"`
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
@@ -38,11 +40,17 @@ type Application struct {
 	Remarks       string    `gorm:"type:text" json:"remarks"`
 	Status        string    `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | accepted | rejected
 
-	// Belongs-to
-	Jobpost Jobpost `gorm:"foreignKey:JobpostID" json:"jobpost,omitempty"`
+	// Belongs-to. The foreign key is left to GORM's convention (Application.JobpostID
+	// -> Jobpost's primary key). Spelling it as `foreignKey:JobpostID` is ambiguous
+	// here because Jobpost's own primary key is also named JobpostID: GORM then reads
+	// it as a has-one and joins jobposts.jobpost_id to applications.application_id,
+	// which silently loads a different position's job post.
+	Jobpost Jobpost `json:"jobpost,omitempty"`
 
 	// Relations
 	Audits []ApplicationAudit `gorm:"foreignKey:ApplicationID" json:"audits,omitempty"`
+
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 // ApplicationAudit records each review/audit action on an Application.

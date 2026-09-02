@@ -26,6 +26,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
 import HighlightOffIcon from '@mui/icons-material/HighlightOff'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
@@ -34,7 +35,7 @@ import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
 import { ApiError } from '../../services/https'
-import { closeJobpost, createJobpost, listMyJobposts, listOpenJobposts, updateJobpost } from '../../services/https/jobposts'
+import { closeJobpost, createJobpost, deleteJobpost, listMyJobposts, listOpenJobposts, updateJobpost } from '../../services/https/jobposts'
 import { createApplication } from '../../services/https/applications'
 import type { Jobpost, UpsertJobpostRequest } from '../../interface/IJobInterface'
 
@@ -512,6 +513,8 @@ function EmployerJobPostingsView() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [closingId, setClosingId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Jobpost | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -585,6 +588,22 @@ function EmployerJobPostingsView() {
       setError('ปิดรับสมัครไม่สำเร็จ')
     } finally {
       setClosingId(null)
+    }
+  }
+
+  async function handleDelete() {
+    if (!token || !deleteTarget) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteJobpost(token, deleteTarget.id)
+      setDeleteTarget(null)
+      setReloadToken((t) => t + 1)
+    } catch (err) {
+      setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'ลบประกาศงานไม่สำเร็จ')
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -807,6 +826,14 @@ function EmployerJobPostingsView() {
                         >
                           ปิดรับสมัคร
                         </Button>
+                        <IconButton
+                          size="small"
+                          title="ลบประกาศงาน"
+                          onClick={() => setDeleteTarget(job)}
+                          sx={{ border: '1px solid #F3C2C4', borderRadius: 1.5 }}
+                        >
+                          <DeleteOutlineIcon fontSize="small" sx={{ color: '#DA1E28' }} />
+                        </IconButton>
                       </Box>
                     </TableCell>
                   </TableRow>
@@ -823,6 +850,33 @@ function EmployerJobPostingsView() {
           </Table>
         </Box>
       )}
+
+      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3.5 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mb: 1 }}>ลบประกาศงานนี้?</Typography>
+          <Typography sx={{ fontSize: 14, color: '#52545C', mb: 1.5 }}>
+            {deleteTarget?.position}
+          </Typography>
+          <Box sx={{ bgcolor: '#FDEAEA', color: '#B3261E', fontSize: 13, borderRadius: 2, p: 1.5, mb: 2.5 }}>
+            ใบสมัครทั้งหมดของประกาศนี้ และนัดสัมภาษณ์ที่ผูกกับใบสมัครเหล่านั้น จะถูกลบไปด้วย — ย้อนกลับไม่ได้
+            <br />
+            ถ้าแค่ไม่อยากรับสมัครเพิ่ม ให้กด &quot;ปิดรับสมัคร&quot; แทน
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
+            <Button onClick={() => setDeleteTarget(null)} sx={{ textTransform: 'none', borderRadius: '40px', px: 3, color: colors.navy, bgcolor: '#F0F0F0' }}>
+              ยกเลิก
+            </Button>
+            <Button
+              variant="contained"
+              disabled={deleting}
+              onClick={() => void handleDelete()}
+              sx={{ textTransform: 'none', borderRadius: '40px', px: 3, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
+            >
+              {deleting ? 'กำลังลบ…' : 'ลบประกาศงาน'}
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
     </Box>
   )
 }

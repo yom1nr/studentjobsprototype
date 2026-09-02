@@ -3,7 +3,10 @@ package dto
 // CreateInterviewRequest schedules an interview appointment for a student the
 // employer wants to interview.
 type CreateInterviewRequest struct {
-	StudentID          uint   `json:"student_id" validate:"required"`
+	// ApplicationID says which accepted application this interview is for; the
+	// student is taken from it. Interviews are per application, not per student,
+	// so someone who applied for two of your positions gets two appointments.
+	ApplicationID      uint   `json:"application_id" validate:"required"`
 	InterviewFormat    string `json:"interview_format" validate:"required,oneof=onsite online"`
 	AppointmentDate    string `json:"appointment_date" validate:"required"` // "2026-07-24"
 	AppointmentTime    string `json:"appointment_time" validate:"required"` // "13:30"
@@ -23,6 +26,7 @@ type UpdateInterviewRequest struct {
 // InterviewResponse is an interview schedule enriched with student/employer display fields.
 type InterviewResponse struct {
 	ID                 uint                 `json:"id"`
+	ApplicationID      *uint                `json:"application_id"`
 	StudentID          uint                 `json:"student_id"`
 	StudentName        string               `json:"student_name"`
 	EmployerID         uint                 `json:"employer_id"`

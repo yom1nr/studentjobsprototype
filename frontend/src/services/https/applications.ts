@@ -21,6 +21,10 @@ export function reviewApplication(token: string, id: number, payload: ReviewAppl
   return apiFetch<Application>(`/api/v1/employer/applications/${id}/review`, { method: 'POST', token, body: payload })
 }
 
+export function deleteApplication(token: string, id: number): Promise<{ deleted: boolean; interviews_removed: number }> {
+  return apiFetch<{ deleted: boolean; interviews_removed: number }>(`/api/v1/employer/applications/${id}`, { method: 'DELETE', token })
+}
+
 export function listAdminApplications(token: string): Promise<AdminApplication[]> {
   return apiFetch<AdminApplication[]>('/api/v1/admin/applications', { token })
 }

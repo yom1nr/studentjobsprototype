@@ -39,6 +39,15 @@ func (h *TimeRecordController) CheckIn(c *gin.Context) {
 		return
 	}
 
+	// Hours only mean something under an accepted agreement — that is what ties a
+	// record to an employer (see employerForStudent) and what payroll bills
+	// against. Without this check a student could log time nobody can ever see or
+	// pay, since every employer-side list is scoped to their hired students.
+	if _, hired := h.employerForStudent(student.UserID); !hired {
+		utils.JSONError(c, http.StatusBadRequest, "check-in failed", "you need an accepted employment agreement before recording work time")
+		return
+	}
+
 	var open models.TimeRecord
 	err := h.db.Where("student_id = ? AND check_out_time IS NULL", student.UserID).First(&open).Error
 	if err == nil {

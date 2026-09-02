@@ -44,9 +44,42 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		return
 	}
 
+	// The application is the anchor: it proves the student applied to a post of
+	// yours and that you accepted them, so the flow apply → accept → interview
+	// can't be skipped, and it says which position the appointment is for.
+	var application models.Application
+	err := h.db.Where("application_id = ? AND jobpost_id IN (?)", payload.ApplicationID,
+		h.db.Model(&models.Jobpost{}).Select("jobpost_id").Where("user_id = ?", employer.UserID)).
+		First(&application).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.JSONError(c, http.StatusNotFound, "application not found", "no application of yours exists with the given id")
+		} else {
+			utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		}
+		return
+	}
+	if application.Status != "accepted" {
+		utils.JSONError(c, http.StatusBadRequest, "create failed", "accept this application before scheduling an interview for it")
+		return
+	}
+
 	var student models.Student
-	if err := h.db.First(&student, payload.StudentID).Error; err != nil {
-		utils.JSONError(c, http.StatusNotFound, "student not found", "no student exists with the given id")
+	if err := h.db.First(&student, application.StudentID).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "student not found", "no student exists for this application")
+		return
+	}
+
+	// One live appointment per application — the UI shows a single appointment
+	// per application row, so a second would silently become unreachable.
+	var existing models.InterviewSchedule
+	err = h.db.Where("application_id = ? AND status <> ?", application.ApplicationID, "cancelled").
+		First(&existing).Error
+	if err == nil {
+		utils.JSONError(c, http.StatusBadRequest, "create failed", "this application already has an interview — edit that appointment instead")
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
 		return
 	}
 
@@ -56,7 +89,9 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		return
 	}
 
+	applicationID := application.ApplicationID
 	interview := &models.InterviewSchedule{
+		ApplicationID:      &applicationID,
 		StudentID:          student.UserID,
 		EmployerID:         employer.UserID,
 		InterviewFormat:    payload.InterviewFormat,
@@ -164,19 +199,13 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 // role) propose a change to an existing interview. Every call is recorded as a
 // new RescheduleInterview history entry and notifies the other party.
 func (h *InterviewController) RequestReschedule(c *gin.Context) {
-	if _, ok := utils.GetUserIDFromContext(c); !ok {
-		utils.JSONError(c, http.StatusUnauthorized, "authorization required", "user id missing from token")
+	interview, ok := h.partyToInterview(c)
+	if !ok {
 		return
 	}
-
-	id, err := utils.ParseUintParam(c, "id")
-	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "invalid interview id", "id must be a number")
-		return
-	}
-	var interview models.InterviewSchedule
-	if err := h.db.First(&interview, id).Error; err != nil {
-		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
+	// Nothing left to move once the interview has been held and its result sent.
+	if interview.Status == "completed" || interview.Result != "" {
+		utils.JSONError(c, http.StatusBadRequest, "request failed", "this interview is already finished")
 		return
 	}
 
@@ -211,7 +240,7 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "request failed", err.Error())
 		return
 	}
-	h.db.Model(&interview).Update("status", "rescheduling")
+	h.db.Model(interview).Update("status", "rescheduling")
 
 	var student models.Student
 	h.db.First(&student, interview.StudentID)
@@ -229,13 +258,12 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 
 // ListReschedules returns the reschedule history for one interview.
 func (h *InterviewController) ListReschedules(c *gin.Context) {
-	id, err := utils.ParseUintParam(c, "id")
-	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "invalid interview id", "id must be a number")
+	interview, ok := h.partyToInterview(c)
+	if !ok {
 		return
 	}
 	var reschedules []models.RescheduleInterview
-	if err := h.db.Where("interview_schedule_id = ?", id).Order("created_at DESC").Find(&reschedules).Error; err != nil {
+	if err := h.db.Where("interview_schedule_id = ?", interview.InterviewID).Order("created_at DESC").Find(&reschedules).Error; err != nil {
 		utils.JSONError(c, http.StatusInternalServerError, "failed to load reschedule history", err.Error())
 		return
 	}
@@ -246,9 +274,10 @@ func (h *InterviewController) ListReschedules(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
 
-// SendResult notifies the student of their interview outcome. There's no
-// persisted result field on InterviewSchedule (see dto.InterviewResultRequest) —
-// "passed" becomes durable once the employer creates an EmploymentAgreement.
+// SendResult notifies the student of their interview outcome and persists it on
+// the InterviewSchedule (Result / ResultComment / ResultAnnouncedAt, status
+// "completed"). The stored "passed" is what gates drafting an employment
+// agreement, so it has to outlive the notification.
 func (h *InterviewController) SendResult(c *gin.Context) {
 	employer, ok := h.currentEmployer(c)
 	if !ok {
@@ -266,6 +295,13 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 	}
 	if err := h.validate.Struct(payload); err != nil {
 		utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
+		return
+	}
+
+	// The result drives what the student is told and whether an employment
+	// agreement may be drafted, so it is announced once and not overwritten.
+	if interview.Result != "" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "the result for this interview has already been announced")
 		return
 	}
 
@@ -322,6 +358,18 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 	var interview models.InterviewSchedule
 	if err := h.db.Where("interview_id = ? AND student_id = ?", id, student.UserID).First(&interview).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
+		return
+	}
+	// Confirming attendance is only meaningful while the appointment is still
+	// ahead. Allowing it afterwards rewinds status from "completed" back to
+	// "confirmed", which leaves an announced result sitting on a schedule that
+	// claims the interview has not happened yet.
+	if interview.Status == "completed" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "this interview is already finished")
+		return
+	}
+	if interview.Status == "cancelled" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "this interview has been cancelled")
 		return
 	}
 
@@ -384,6 +432,36 @@ func (h *InterviewController) ownedByEmployer(c *gin.Context, employerID uint) (
 	return &interview, true
 }
 
+// partyToInterview loads the interview named by :id but only for the two people
+// actually on it — the student it was booked for, or the employer who booked it.
+// Reschedule requests and their history are shared by both sides, so neither an
+// employer-only nor a student-only guard fits; without this any signed-in user
+// could reschedule or read someone else's appointment by guessing its id.
+func (h *InterviewController) partyToInterview(c *gin.Context) (*models.InterviewSchedule, bool) {
+	userID, ok := utils.GetUserIDFromContext(c)
+	if !ok {
+		utils.JSONError(c, http.StatusUnauthorized, "authorization required", "user id missing from token")
+		return nil, false
+	}
+	id, err := utils.ParseUintParam(c, "id")
+	if err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "invalid interview id", "id must be a number")
+		return nil, false
+	}
+	var interview models.InterviewSchedule
+	if err := h.db.First(&interview, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
+		return nil, false
+	}
+	// Student and employer ids both reference users.user_id, so the caller's own
+	// id is enough to tell whether they are on this appointment.
+	if interview.StudentID != userID && interview.EmployerID != userID {
+		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
+		return nil, false
+	}
+	return &interview, true
+}
+
 func (h *InterviewController) studentName(studentID uint) string {
 	var student models.Student
 	if err := h.db.First(&student, studentID).Error; err != nil {
@@ -411,6 +489,7 @@ func (h *InterviewController) mapToResponse(iv *models.InterviewSchedule, compan
 	}
 	return dto.InterviewResponse{
 		ID:                 iv.InterviewID,
+		ApplicationID:      iv.ApplicationID,
 		StudentID:          iv.StudentID,
 		StudentName:        studentName,
 		EmployerID:         iv.EmployerID,

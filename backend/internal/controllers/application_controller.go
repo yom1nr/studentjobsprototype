@@ -303,6 +303,61 @@ func (h *ApplicationController) VerifyApplication(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapAdminApplicationToResponse(application, employer.CompanyName, name, university))
 }
 
+// DeleteApplication removes one application sent to the current employer's job
+// post, together with its review history and any interview booked for it.
+//
+// Rejecting an application keeps it on file; deleting is for clearing out records
+// that should not be there at all. An application that already led to a hire is
+// refused so an employment agreement is never left pointing at nothing.
+func (h *ApplicationController) DeleteApplication(c *gin.Context) {
+    employer, ok := h.currentEmployer(c)
+    if !ok {
+        return
+    }
+    application, ok := h.ownedByEmployer(c, employer.UserID)
+    if !ok {
+        return
+    }
+
+    var interviewIDs []uint
+    h.db.Model(&models.InterviewSchedule{}).Where("application_id = ?", application.ApplicationID).Pluck("interview_id", &interviewIDs)
+
+    if len(interviewIDs) > 0 {
+        var hires int64
+        if err := h.db.Model(&models.EmploymentAgreement{}).Where("interview_schedule_id IN ?", interviewIDs).Count(&hires).Error; err != nil {
+            utils.JSONError(c, http.StatusBadRequest, "delete failed", err.Error())
+            return
+        }
+        if hires > 0 {
+            utils.JSONError(c, http.StatusBadRequest, "delete failed", "this application already led to an employment agreement and cannot be deleted")
+            return
+        }
+    }
+
+    if err := h.db.Transaction(func(tx *gorm.DB) error {
+        if len(interviewIDs) > 0 {
+            if err := tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.Notification{}).Error; err != nil {
+                return err
+            }
+            if err := tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.RescheduleInterview{}).Error; err != nil {
+                return err
+            }
+            if err := tx.Where("interview_id IN ?", interviewIDs).Delete(&models.InterviewSchedule{}).Error; err != nil {
+                return err
+            }
+        }
+        if err := tx.Where("application_id = ?", application.ApplicationID).Delete(&models.ApplicationAudit{}).Error; err != nil {
+            return err
+        }
+        return tx.Delete(&models.Application{}, application.ApplicationID).Error
+    }); err != nil {
+        utils.JSONError(c, http.StatusInternalServerError, "delete failed", err.Error())
+        return
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, gin.H{"deleted": true, "interviews_removed": len(interviewIDs)})
+}
+
 func (h *ApplicationController) loadApplicationForAdmin(c *gin.Context) (*models.Application, bool) {
     id, err := utils.ParseUintParam(c, "id")
     if err != nil {

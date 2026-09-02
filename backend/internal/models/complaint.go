@@ -2,13 +2,11 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // Complaint is a report submitted by any User.
 type Complaint struct {
-	gorm.Model
+	ComplaintID      uint      `gorm:"primaryKey" json:"complaint_id"`
 	UserID           uint      `gorm:"not null;index" json:"user_id"`
 	Title            string    `gorm:"size:255;not null" json:"title"`
 	Description      string    `gorm:"type:text" json:"description"`
@@ -25,17 +23,17 @@ type Complaint struct {
 
 // ComplaintHistory tracks every status change on a Complaint.
 type ComplaintHistory struct {
-	gorm.Model
-	ComplaintID  uint      `gorm:"not null;index" json:"complaint_id"`
-	Status       string    `gorm:"size:50;not null" json:"status"`
-	ActionByRole string    `gorm:"size:50" json:"action_by_role"` // student | employer | admin
-	Note         string    `gorm:"type:text" json:"note"`
-	Timestamp    time.Time `gorm:"not null" json:"timestamp"`
+	ComplaintHistoryID uint      `gorm:"primaryKey" json:"complaint_history_id"`
+	ComplaintID        uint      `gorm:"not null;index" json:"complaint_id"`
+	Status             string    `gorm:"size:50;not null" json:"status"`
+	ActionByRole       string    `gorm:"size:50" json:"action_by_role"` // student | employer | admin
+	Note               string    `gorm:"type:text" json:"note"`
+	Timestamp          time.Time `gorm:"not null" json:"timestamp"`
 }
 
 // Attachment is a file uploaded in support of a Complaint.
 type Attachment struct {
-	gorm.Model
+	AttachmentID uint   `gorm:"primaryKey" json:"attachment_id"`
 	ComplaintID uint   `gorm:"not null;index" json:"complaint_id"`
 	FileName    string `gorm:"size:255;not null" json:"file_name"`
 	FileType    string `gorm:"size:100" json:"file_type"`

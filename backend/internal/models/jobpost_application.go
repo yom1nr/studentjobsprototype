@@ -2,16 +2,15 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // Jobpost is a job listing created by an Employer. Period is free text (e.g.
 // "3 เดือน") per the actual create/edit design, not a date — the class
 // diagram typed it as dateTime, but the UI never shows a date picker for it.
 type Jobpost struct {
-	gorm.Model
-	EmployerID      uint      `gorm:"not null;index" json:"employer_id"`
+	JobpostID       uint      `gorm:"primaryKey;autoIncrement" json:"jobpost_id"`
+	UserID          uint      `gorm:"not null;index" json:"user_id"`
+	JobID           string    `gorm:"size:150;not null" json:"job_id"`
 	Position        string    `gorm:"size:150;not null" json:"position"`
 	JobType         string    `gorm:"size:100" json:"job_type"`
 	JobDescription  string    `gorm:"type:text" json:"job_description"`
@@ -25,17 +24,19 @@ type Jobpost struct {
 	Status          string    `gorm:"size:50;not null;default:'open'" json:"status"` // open | closed | draft
 
 	// Relations
+	User         *User         `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Applications []Application `gorm:"foreignKey:JobpostID" json:"applications,omitempty"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 // Application is a student's job application for a Jobpost.
 type Application struct {
-	gorm.Model
-	StudentID  uint      `gorm:"not null;index" json:"student_id"`
-	JobpostID  uint      `gorm:"not null;index" json:"jobpost_id"`
-	ApplyDate  *time.Time `json:"apply_date"`
-	Remarks    string    `gorm:"type:text" json:"remarks"`
-	Status     string    `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | accepted | rejected
+	ApplicationID uint      `gorm:"primaryKey" json:"application_id"`
+	StudentID     uint      `gorm:"not null;index" json:"student_id"`
+	JobpostID     uint      `gorm:"not null;index" json:"jobpost_id"`
+	ApplyDate     *time.Time `json:"apply_date"`
+	Remarks       string    `gorm:"type:text" json:"remarks"`
+	Status        string    `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | accepted | rejected
 
 	// Belongs-to
 	Jobpost Jobpost `gorm:"foreignKey:JobpostID" json:"jobpost,omitempty"`
@@ -46,10 +47,10 @@ type Application struct {
 
 // ApplicationAudit records each review/audit action on an Application.
 type ApplicationAudit struct {
-	gorm.Model
-	ApplicationID uint      `gorm:"not null;index" json:"application_id"`
-	AdminID       *uint     `gorm:"index" json:"admin_id"`
-	ResultStatus  string    `gorm:"size:50;not null" json:"result_status"`
-	Comment       string    `gorm:"type:text" json:"comment"`
-	CheckedAt     time.Time `gorm:"not null" json:"checked_at"`
+	ApplicationAuditID uint      `gorm:"primaryKey" json:"application_audit_id"`
+	ApplicationID      uint      `gorm:"not null;index" json:"application_id"`
+	AdminID            *uint     `gorm:"index" json:"admin_id"`
+	ResultStatus       string    `gorm:"size:50;not null" json:"result_status"`
+	Comment            string    `gorm:"type:text" json:"comment"`
+	CheckedAt          time.Time `gorm:"not null" json:"checked_at"`
 }

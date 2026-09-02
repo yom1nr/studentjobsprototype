@@ -116,7 +116,7 @@ func (h *NotificationController) MarkAllRead(c *gin.Context) {
 
 func mapNotificationToResponse(n *models.Notification) dto.NotificationResponse {
     return dto.NotificationResponse{
-        ID:               n.ID,
+        ID:               n.NotificationID,
         Title:            n.Title,
         NotificationType: n.NotificationType,
         Message:          n.Message,

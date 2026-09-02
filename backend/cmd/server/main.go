@@ -4,7 +4,6 @@ import (
     "fmt"
     "log"
 
-    "github.com/gin-gonic/gin"
     "github.com/joho/godotenv"
 
     "github.com/SA/Golang-Backend-Example/internal/config"
@@ -59,7 +58,6 @@ func main() {
         payrollController,
         complaintController,
     )
-    router.Use(gin.Recovery())
 
     port := cfg.ServerPort
     if port == "" {

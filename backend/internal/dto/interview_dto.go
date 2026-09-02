@@ -22,18 +22,21 @@ type UpdateInterviewRequest struct {
 
 // InterviewResponse is an interview schedule enriched with student/employer display fields.
 type InterviewResponse struct {
-	ID                 uint                  `json:"id"`
-	StudentID          uint                  `json:"student_id"`
-	StudentName        string                `json:"student_name"`
-	EmployerID         uint                  `json:"employer_id"`
-	CompanyName        string                `json:"company_name"`
-	InterviewFormat    string                `json:"interview_format"`
-	AppointmentDate    string                `json:"appointment_date"`
-	AppointmentTime    string                `json:"appointment_time"`
-	Location           string                `json:"location"`
-	PreparationDetails string                `json:"preparation_details"`
-	CreatedAt          string                `json:"created_at"`
-	Reschedules        []RescheduleResponse  `json:"reschedules,omitempty"`
+	ID                 uint                 `json:"id"`
+	StudentID          uint                 `json:"student_id"`
+	StudentName        string               `json:"student_name"`
+	EmployerID         uint                 `json:"employer_id"`
+	CompanyName        string               `json:"company_name"`
+	InterviewFormat    string               `json:"interview_format"`
+	AppointmentDate    string               `json:"appointment_date"`
+	AppointmentTime    string               `json:"appointment_time"`
+	Location           string               `json:"location"`
+	PreparationDetails string               `json:"preparation_details"`
+	Status             string               `json:"status"`
+	Result             string               `json:"result"`
+	ResultComment      string               `json:"result_comment"`
+	CreatedAt          string               `json:"created_at"`
+	Reschedules        []RescheduleResponse `json:"reschedules,omitempty"`
 }
 
 // RequestRescheduleRequest asks the other party to propose/confirm a new time.
@@ -55,9 +58,9 @@ type RescheduleResponse struct {
 }
 
 // InterviewResultRequest lets the employer notify a student of the interview outcome.
-// There's no persisted result field on InterviewSchedule (not in the class
-// diagram) — "passed" is captured for real once an EmploymentAgreement is
-// created for that student; this endpoint only sends the notification.
+// The result is persisted on InterviewSchedule (Result / ResultComment /
+// ResultAnnouncedAt) as well as sent as a notification, so the student can
+// re-open the result page and the employer can see who has already been told.
 type InterviewResultRequest struct {
 	Result  string `json:"result" validate:"required,oneof=passed failed"`
 	Comment string `json:"comment" validate:"omitempty"`

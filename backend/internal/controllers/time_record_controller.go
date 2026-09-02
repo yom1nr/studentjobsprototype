@@ -40,7 +40,7 @@ func (h *TimeRecordController) CheckIn(c *gin.Context) {
 	}
 
 	var open models.TimeRecord
-	err := h.db.Where("student_id = ? AND check_out_time IS NULL", student.ID).First(&open).Error
+	err := h.db.Where("student_id = ? AND check_out_time IS NULL", student.UserID).First(&open).Error
 	if err == nil {
 		utils.JSONError(c, http.StatusBadRequest, "check-in failed", "you already have an open time record")
 		return
@@ -50,7 +50,7 @@ func (h *TimeRecordController) CheckIn(c *gin.Context) {
 	}
 
 	record := &models.TimeRecord{
-		StudentID:    student.ID,
+		StudentID:    student.UserID,
 		CheckInTime:  time.Now().UTC(),
 		Latitude:     payload.Latitude,
 		Longitude:    payload.Longitude,
@@ -61,7 +61,7 @@ func (h *TimeRecordController) CheckIn(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(record, h.studentName(student.ID)))
+	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(record, h.studentName(student.UserID)))
 }
 
 // CheckOut closes the current student's open time record.
@@ -77,7 +77,7 @@ func (h *TimeRecordController) CheckOut(c *gin.Context) {
 		return
 	}
 	var record models.TimeRecord
-	if err := h.db.Where("id = ? AND student_id = ?", id, student.ID).First(&record).Error; err != nil {
+	if err := h.db.Where("record_id = ? AND student_id = ?", id, student.UserID).First(&record).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "time record not found", "no time record exists with the given id")
 		return
 	}
@@ -97,7 +97,7 @@ func (h *TimeRecordController) CheckOut(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(&record, h.studentName(student.ID)))
+	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(&record, h.studentName(student.UserID)))
 }
 
 // ListMyTimeRecords returns the current student's own time records, newest first.
@@ -108,12 +108,12 @@ func (h *TimeRecordController) ListMyTimeRecords(c *gin.Context) {
 	}
 
 	var records []models.TimeRecord
-	if err := h.db.Preload("EditRequest").Where("student_id = ?", student.ID).Order("check_in_time DESC").Find(&records).Error; err != nil {
+	if err := h.db.Preload("EditRequest").Where("student_id = ?", student.UserID).Order("check_in_time DESC").Find(&records).Error; err != nil {
 		utils.JSONError(c, http.StatusInternalServerError, "failed to load time records", err.Error())
 		return
 	}
 
-	name := h.studentName(student.ID)
+	name := h.studentName(student.UserID)
 	responses := make([]dto.TimeRecordResponse, 0, len(records))
 	for i := range records {
 		responses = append(responses, h.mapToResponse(&records[i], name))
@@ -129,7 +129,7 @@ func (h *TimeRecordController) ListEmployerTimeRecords(c *gin.Context) {
 		return
 	}
 
-	studentIDs := h.acceptedStudentIDs(employer.ID)
+	studentIDs := h.acceptedStudentIDs(employer.UserID)
 	var records []models.TimeRecord
 	query := h.db.Preload("EditRequest").Order("check_in_time DESC")
 	if len(studentIDs) > 0 {
@@ -162,7 +162,7 @@ func (h *TimeRecordController) CreateEditRequest(c *gin.Context) {
 		return
 	}
 	var record models.TimeRecord
-	if err := h.db.Where("id = ? AND student_id = ?", id, student.ID).First(&record).Error; err != nil {
+	if err := h.db.Where("record_id = ? AND student_id = ?", id, student.UserID).First(&record).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "time record not found", "no time record exists with the given id")
 		return
 	}
@@ -186,14 +186,14 @@ func (h *TimeRecordController) CreateEditRequest(c *gin.Context) {
 		newCheckOutPtr = &newCheckOut
 	}
 
-	employerID, ok := h.employerForStudent(student.ID)
+	employerID, ok := h.employerForStudent(student.UserID)
 	if !ok {
 		utils.JSONError(c, http.StatusBadRequest, "request failed", "no employer found for your accepted agreement")
 		return
 	}
 
 	editRequest := &models.TimeEditRequest{
-		TimeRecordID:    record.ID,
+		RecordID:        record.RecordID,
 		EmployerID:      employerID,
 		NewCheckInTime:  newCheckIn,
 		NewCheckOutTime: newCheckOutPtr,
@@ -208,10 +208,10 @@ func (h *TimeRecordController) CreateEditRequest(c *gin.Context) {
 	var employer models.Employer
 	if h.db.First(&employer, employerID).Error == nil {
 		notifyUser(h.db, employer.UserID, "คำร้องขอแก้ไขเวลาทำงาน", "time_edit_request",
-			fmt.Sprintf("%s ขอแก้ไขเวลาทำงานวันที่ %s", h.studentName(student.ID), record.CheckInTime.Format("2006-01-02")))
+			fmt.Sprintf("%s ขอแก้ไขเวลาทำงานวันที่ %s", h.studentName(student.UserID), record.CheckInTime.Format("2006-01-02")))
 	}
 
-	utils.JSONSuccess(c, http.StatusCreated, mapTimeEditRequestToResponse(editRequest, h.studentName(student.ID), &record))
+	utils.JSONSuccess(c, http.StatusCreated, mapTimeEditRequestToResponse(editRequest, h.studentName(student.UserID), &record))
 }
 
 // ListEmployerEditRequests returns time-edit requests submitted to the current employer.
@@ -222,7 +222,7 @@ func (h *TimeRecordController) ListEmployerEditRequests(c *gin.Context) {
 	}
 
 	var requests []models.TimeEditRequest
-	if err := h.db.Where("employer_id = ?", employer.ID).Order("created_at DESC").Find(&requests).Error; err != nil {
+	if err := h.db.Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&requests).Error; err != nil {
 		utils.JSONError(c, http.StatusInternalServerError, "failed to load edit requests", err.Error())
 		return
 	}
@@ -230,7 +230,7 @@ func (h *TimeRecordController) ListEmployerEditRequests(c *gin.Context) {
 	responses := make([]dto.TimeEditRequestResponse, 0, len(requests))
 	for i := range requests {
 		var record models.TimeRecord
-		h.db.First(&record, requests[i].TimeRecordID)
+		h.db.First(&record, requests[i].RecordID)
 		responses = append(responses, mapTimeEditRequestToResponse(&requests[i], h.studentName(record.StudentID), &record))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
@@ -242,7 +242,7 @@ func (h *TimeRecordController) ApproveEditRequest(c *gin.Context) {
 	if !ok {
 		return
 	}
-	editRequest, ok := h.ownedByEmployer(c, employer.ID)
+	editRequest, ok := h.ownedByEmployer(c, employer.UserID)
 	if !ok {
 		return
 	}
@@ -252,7 +252,7 @@ func (h *TimeRecordController) ApproveEditRequest(c *gin.Context) {
 	}
 
 	var record models.TimeRecord
-	if err := h.db.First(&record, editRequest.TimeRecordID).Error; err != nil {
+	if err := h.db.First(&record, editRequest.RecordID).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "time record not found", "no time record exists with the given id")
 		return
 	}
@@ -284,7 +284,7 @@ func (h *TimeRecordController) RejectEditRequest(c *gin.Context) {
 	if !ok {
 		return
 	}
-	editRequest, ok := h.ownedByEmployer(c, employer.ID)
+	editRequest, ok := h.ownedByEmployer(c, employer.UserID)
 	if !ok {
 		return
 	}
@@ -303,7 +303,7 @@ func (h *TimeRecordController) RejectEditRequest(c *gin.Context) {
 	}
 
 	var record models.TimeRecord
-	h.db.First(&record, editRequest.TimeRecordID)
+	h.db.First(&record, editRequest.RecordID)
 
 	var student models.Student
 	if h.db.First(&student, record.StudentID).Error == nil {
@@ -356,7 +356,7 @@ func (h *TimeRecordController) ownedByEmployer(c *gin.Context, employerID uint) 
 		return nil, false
 	}
 	var editRequest models.TimeEditRequest
-	if err := h.db.Where("id = ? AND employer_id = ?", id, employerID).First(&editRequest).Error; err != nil {
+	if err := h.db.Where("request_id = ? AND employer_id = ?", id, employerID).First(&editRequest).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "edit request not found", "no edit request exists with the given id")
 		return nil, false
 	}
@@ -402,7 +402,7 @@ func (h *TimeRecordController) mapToResponse(r *models.TimeRecord, studentName s
 		editResp = &mapped
 	}
 	return dto.TimeRecordResponse{
-		ID:           r.ID,
+		ID:           r.RecordID,
 		StudentID:    r.StudentID,
 		StudentName:  studentName,
 		CheckInTime:  r.CheckInTime.Format(time.RFC3339),
@@ -428,8 +428,8 @@ func mapTimeEditRequestToResponse(er *models.TimeEditRequest, studentName string
 		newCheckOut = er.NewCheckOutTime.Format(time.RFC3339)
 	}
 	return dto.TimeEditRequestResponse{
-		ID:              er.ID,
-		TimeRecordID:    er.TimeRecordID,
+		ID:              er.RequestID,
+		TimeRecordID:    er.RecordID,
 		StudentName:     studentName,
 		OldCheckInTime:  oldCheckIn,
 		OldCheckOutTime: oldCheckOut,

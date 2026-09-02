@@ -39,7 +39,7 @@ func (h *UserController) GetProfile(c *gin.Context) {
 
     user, err := h.findByID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusNotFound, "profile not found", err.Error())
+        utils.JSONInternalError(c, "profile not found", err)
         return
     }
     if user == nil {
@@ -71,7 +71,7 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
 
     user, err := h.findByID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+        utils.JSONInternalError(c, "update failed", err)
         return
     }
     if user == nil {
@@ -82,7 +82,7 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
     if payload.Email != "" && payload.Email != user.Email {
         existing, err := h.findByEmail(payload.Email)
         if err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            utils.JSONInternalError(c, "update failed", err)
             return
         }
         if existing != nil {
@@ -103,7 +103,7 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
 
         hashedPassword, err := utils.HashPassword(payload.Password)
         if err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            utils.JSONInternalError(c, "update failed", err)
             return
         }
         user.Password = hashedPassword
@@ -114,13 +114,10 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
     if payload.Gender != "" {
         user.Gender = payload.Gender
     }
-    if payload.Role != "" {
-        user.Role = payload.Role
-    }
 
     user.UpdatedAt = time.Now().UTC()
     if err := h.db.Save(user).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+        utils.JSONInternalError(c, "update failed", err)
         return
     }
 
@@ -137,7 +134,7 @@ func (h *UserController) DeleteUser(c *gin.Context) {
 
     user, err := h.findByID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "delete failed", err.Error())
+        utils.JSONInternalError(c, "delete failed", err)
         return
     }
     if user == nil {
@@ -146,7 +143,7 @@ func (h *UserController) DeleteUser(c *gin.Context) {
     }
 
     if err := h.db.Delete(user).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "delete failed", err.Error())
+        utils.JSONInternalError(c, "delete failed", err)
         return
     }
 
@@ -157,7 +154,7 @@ func (h *UserController) DeleteUser(c *gin.Context) {
 func (h *UserController) GetAllUsers(c *gin.Context) {
     var users []models.User
     if err := h.db.Find(&users).Error; err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "failed to load users", err.Error())
+        utils.JSONInternalError(c, "failed to load users", err)
         return
     }
 
@@ -185,7 +182,7 @@ func (h *UserController) GetUserByID(c *gin.Context) {
 
     user, err := h.findByID(uint(userID))
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "failed to load user", err.Error())
+        utils.JSONInternalError(c, "failed to load user", err)
         return
     }
     if user == nil {
@@ -222,7 +219,7 @@ func (h *UserController) findByEmail(email string) (*models.User, error) {
 
 func mapUserToResponse(user *models.User) *dto.UserResponse {
     return &dto.UserResponse{
-        ID:        user.ID,
+        ID:        user.UserID,
         UserName:  user.UserName,
         Email:     user.Email,
         Phone:     user.Phone,

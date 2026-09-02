@@ -56,8 +56,8 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 	}
 
 	agreement := &models.EmploymentAgreement{
-		StudentID:       student.ID,
-		EmployerID:      employer.ID,
+		StudentID:       student.UserID,
+		EmployerID:      employer.UserID,
 		StartDate:       &start,
 		WageRate:        payload.WageRate,
 		DurationMonths:  payload.DurationMonths,
@@ -74,7 +74,7 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 	notifyUser(h.db, student.UserID, "ข้อตกลงการจ้างงานใหม่", "employment_agreement",
 		fmt.Sprintf("%s ส่งข้อตกลงการจ้างงานให้คุณตรวจสอบ กรุณาตอบรับหรือปฏิเสธ", employer.CompanyName))
 
-	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(agreement, employer.CompanyName, h.studentName(student.ID)))
+	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(agreement, employer.CompanyName, h.studentName(student.UserID)))
 }
 
 // ListMine returns agreements scoped to the current user's role.
@@ -93,7 +93,7 @@ func (h *EmploymentController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := h.db.Where("employer_id = ?", employer.ID).Order("created_at DESC").Find(&agreements).Error; err != nil {
+		if err := h.db.Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&agreements).Error; err != nil {
 			utils.JSONError(c, http.StatusInternalServerError, "failed to load agreements", err.Error())
 			return
 		}
@@ -110,13 +110,13 @@ func (h *EmploymentController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
-	if err := h.db.Where("student_id = ?", student.ID).Order("created_at DESC").Find(&agreements).Error; err != nil {
+	if err := h.db.Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&agreements).Error; err != nil {
 		utils.JSONError(c, http.StatusInternalServerError, "failed to load agreements", err.Error())
 		return
 	}
 	responses := make([]dto.AgreementResponse, 0, len(agreements))
 	for i := range agreements {
-		responses = append(responses, h.mapToResponse(&agreements[i], h.companyName(agreements[i].EmployerID), h.studentName(student.ID)))
+		responses = append(responses, h.mapToResponse(&agreements[i], h.companyName(agreements[i].EmployerID), h.studentName(student.UserID)))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -139,7 +139,7 @@ func (h *EmploymentController) Accept(c *gin.Context) {
 	}
 
 	notifyUser(h.db, employer.UserID, "นักศึกษาตอบรับข้อตกลงการจ้างงาน", "employment_agreement",
-		fmt.Sprintf("ข้อตกลง AG-%d เปลี่ยนสถานะเป็น \"มีผลบังคับ\"", agreement.ID))
+		fmt.Sprintf("ข้อตกลง AG-%d เปลี่ยนสถานะเป็น \"มีผลบังคับ\"", agreement.AgreementID))
 
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(agreement, employer.CompanyName, h.studentName(agreement.StudentID)))
 }
@@ -173,7 +173,7 @@ func (h *EmploymentController) Reject(c *gin.Context) {
 	}
 
 	notifyUser(h.db, employer.UserID, "นักศึกษาปฏิเสธข้อตกลงการจ้างงาน", "employment_agreement",
-		fmt.Sprintf("ข้อตกลง AG-%d ถูกปฏิเสธ: %s", agreement.ID, payload.Reason))
+		fmt.Sprintf("ข้อตกลง AG-%d ถูกปฏิเสธ: %s", agreement.AgreementID, payload.Reason))
 
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(agreement, employer.CompanyName, h.studentName(agreement.StudentID)))
 }
@@ -214,7 +214,7 @@ func (h *EmploymentController) ownedByCurrentStudent(c *gin.Context) (*models.Em
 		return nil, nil, false
 	}
 	var agreement models.EmploymentAgreement
-	if err := h.db.Where("id = ? AND student_id = ?", id, student.ID).First(&agreement).Error; err != nil {
+	if err := h.db.Where("agreement_id = ? AND student_id = ?", id, student.UserID).First(&agreement).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "agreement not found", "no agreement exists with the given id")
 		return nil, nil, false
 	}
@@ -247,7 +247,7 @@ func (h *EmploymentController) mapToResponse(a *models.EmploymentAgreement, comp
 		startDate = a.StartDate.Format("2006-01-02")
 	}
 	return dto.AgreementResponse{
-		ID:              a.ID,
+		ID:              a.AgreementID,
 		StudentID:       a.StudentID,
 		StudentName:     studentName,
 		EmployerID:      a.EmployerID,

@@ -105,7 +105,7 @@ func (h *AdminController) ApproveEmployer(c *gin.Context) {
     }
 
     employer.Approve.Status = "approved"
-    employer.Approve.AdminID = &admin.ID
+    employer.Approve.AdminID = &admin.UserID
     if err := h.db.Save(employer.Approve).Error; err != nil {
         utils.JSONError(c, http.StatusBadRequest, "approval failed", err.Error())
         return
@@ -151,7 +151,7 @@ func (h *AdminController) RejectEmployer(c *gin.Context) {
     }
 
     employer.Approve.Status = "rejected"
-    employer.Approve.AdminID = &admin.ID
+    employer.Approve.AdminID = &admin.UserID
     if err := h.db.Save(employer.Approve).Error; err != nil {
         utils.JSONError(c, http.StatusBadRequest, "rejection failed", err.Error())
         return
@@ -214,12 +214,12 @@ func mapEmployerApprovalToResponse(user *models.User, employer *models.Employer)
     dateOfSignUp := ""
     if employer.Approve != nil {
         status = employer.Approve.Status
-        dateOfSignUp = employer.Approve.DateOfSignUp
+        dateOfSignUp = employer.Approve.DateOfSignUp.Format(time.RFC3339)
     }
 
     return dto.EmployerApprovalResponse{
-        EmployerID:     employer.ID,
-        UserID:         user.ID,
+        EmployerID:     employer.UserID,
+        UserID:         user.UserID,
         Email:          user.Email,
         FirstName:      employer.FirstName,
         LastName:       employer.LastName,
@@ -234,7 +234,7 @@ func mapEmployerApprovalToResponse(user *models.User, employer *models.Employer)
 
 func mapEmployerApprovalStatus(employer *models.Employer) gin.H {
     return gin.H{
-        "employer_id": employer.ID,
+        "employer_id": employer.UserID,
         "status":      employer.Approve.Status,
         "reviewed_at": time.Now().UTC().Format(time.RFC3339),
     }

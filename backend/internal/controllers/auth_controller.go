@@ -49,9 +49,15 @@ func (h *AuthController) Register(c *gin.Context) {
         return
     }
 
+    // Defence in depth: the DTO already rejects "admin", but never trust the
+    // client for the role — an empty/omitted role registers as a student.
+    if payload.Role != "student" && payload.Role != "employer" {
+        payload.Role = "student"
+    }
+
     existing, err := h.findByEmail(payload.Email)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, msgRegistrationFailed, err.Error())
+        utils.JSONInternalError(c, msgRegistrationFailed, err)
         return
     }
     if existing != nil {
@@ -61,7 +67,7 @@ func (h *AuthController) Register(c *gin.Context) {
 
     hashedPassword, err := utils.HashPassword(payload.Password)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, msgRegistrationFailed, err.Error())
+        utils.JSONInternalError(c, msgRegistrationFailed, err)
         return
     }
 
@@ -75,20 +81,20 @@ func (h *AuthController) Register(c *gin.Context) {
     }
 
     if err := h.db.Create(user).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, msgRegistrationFailed, err.Error())
+        utils.JSONInternalError(c, msgRegistrationFailed, err)
         return
     }
 
-    token, err := h.jwtProvider.GenerateToken(user.ID, user.Role)
+    token, err := h.jwtProvider.GenerateToken(user.UserID, user.Role)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, msgRegistrationFailed, err.Error())
+        utils.JSONInternalError(c, msgRegistrationFailed, err)
         return
     }
 
     utils.JSONSuccess(c, http.StatusCreated, dto.AuthResponse{
         Token: token,
         User: dto.UserResponse{
-            ID:        user.ID,
+            ID:        user.UserID,
             UserName:  user.UserName,
             Email:     user.Email,
             Phone:     user.Phone,
@@ -115,7 +121,7 @@ func (h *AuthController) Login(c *gin.Context) {
 
     user, err := h.findByEmail(payload.Email)
     if err != nil {
-        utils.JSONError(c, http.StatusUnauthorized, msgLoginFailed, err.Error())
+        utils.JSONInternalError(c, msgLoginFailed, err)
         return
     }
     if user == nil {
@@ -128,16 +134,16 @@ func (h *AuthController) Login(c *gin.Context) {
         return
     }
 
-    token, err := h.jwtProvider.GenerateToken(user.ID, user.Role)
+    token, err := h.jwtProvider.GenerateToken(user.UserID, user.Role)
     if err != nil {
-        utils.JSONError(c, http.StatusUnauthorized, msgLoginFailed, err.Error())
+        utils.JSONInternalError(c, msgLoginFailed, err)
         return
     }
 
     utils.JSONSuccess(c, http.StatusOK, dto.AuthResponse{
         Token: token,
         User: dto.UserResponse{
-            ID:        user.ID,
+            ID:        user.UserID,
             UserName:  user.UserName,
             Email:     user.Email,
             Phone:     user.Phone,

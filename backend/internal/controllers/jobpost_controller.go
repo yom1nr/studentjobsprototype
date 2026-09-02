@@ -69,7 +69,7 @@ func (h *JobpostController) ListMyJobposts(c *gin.Context) {
     }
 
     var jobposts []models.Jobpost
-    if err := h.db.Where("employer_id = ?", employer.ID).Order("created_at DESC").Find(&jobposts).Error; err != nil {
+    if err := h.db.Where("user_id = ?", employer.UserID).Order("created_at DESC").Find(&jobposts).Error; err != nil {
         utils.JSONError(c, http.StatusInternalServerError, "failed to load job posts", err.Error())
         return
     }
@@ -105,7 +105,7 @@ func (h *JobpostController) CreateJobpost(c *gin.Context) {
     }
 
     jobpost := &models.Jobpost{
-        EmployerID:     employer.ID,
+        UserID:         employer.UserID,
         Position:       payload.Position,
         JobType:        payload.JobType,
         JobDescription: payload.JobDescription,
@@ -133,7 +133,7 @@ func (h *JobpostController) UpdateJobpost(c *gin.Context) {
         return
     }
 
-    jobpost, ok := h.ownedJobpost(c, employer.ID)
+    jobpost, ok := h.ownedJobpost(c, employer.UserID)
     if !ok {
         return
     }
@@ -180,7 +180,7 @@ func (h *JobpostController) CloseJobpost(c *gin.Context) {
         return
     }
 
-    jobpost, ok := h.ownedJobpost(c, employer.ID)
+    jobpost, ok := h.ownedJobpost(c, employer.UserID)
     if !ok {
         return
     }
@@ -226,7 +226,7 @@ func (h *JobpostController) ownedJobpost(c *gin.Context, employerID uint) (*mode
         utils.JSONError(c, http.StatusBadRequest, "failed to load job post", err.Error())
         return nil, false
     }
-    if jobpost == nil || jobpost.EmployerID != employerID {
+    if jobpost == nil || jobpost.UserID != employerID {
         utils.JSONError(c, http.StatusNotFound, "job post not found", "no job post exists with the given id")
         return nil, false
     }
@@ -249,7 +249,7 @@ func (h *JobpostController) findByID(id uint) (*models.Jobpost, error) {
 func (h *JobpostController) mapWithCompanyName(jobpost *models.Jobpost) dto.JobpostResponse {
     var employer models.Employer
     companyName := ""
-    if err := h.db.Select("company_name").First(&employer, jobpost.EmployerID).Error; err == nil {
+    if err := h.db.Select("company_name").First(&employer, jobpost.UserID).Error; err == nil {
         companyName = employer.CompanyName
     }
     return mapJobpostToResponse(jobpost, companyName)
@@ -263,8 +263,8 @@ func mapJobpostToResponse(jobpost *models.Jobpost, companyName string) dto.Jobpo
     }
 
     return dto.JobpostResponse{
-        ID:             jobpost.ID,
-        EmployerID:     jobpost.EmployerID,
+        ID:             jobpost.JobpostID,
+        EmployerID:     jobpost.UserID,
         CompanyName:    companyName,
         Position:       jobpost.Position,
         JobType:        jobpost.JobType,

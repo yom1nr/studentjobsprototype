@@ -55,7 +55,7 @@ func (h *ComplaintController) Create(c *gin.Context) {
 
 	role, _ := utils.GetUserRoleFromContext(c)
 	history := &models.ComplaintHistory{
-		ComplaintID:  complaint.ID,
+		ComplaintID:  complaint.ComplaintID,
 		Status:       "submitted",
 		ActionByRole: role,
 		Note:         "ได้รับเรื่องร้องเรียนเรียบร้อย",
@@ -151,7 +151,7 @@ func (h *ComplaintController) AddAttachment(c *gin.Context) {
 	}
 
 	attachment := &models.Attachment{
-		ComplaintID: complaint.ID,
+		ComplaintID: complaint.ComplaintID,
 		FileName:    payload.FileName,
 		FileType:    payload.FileType,
 		FileSize:    payload.FileSize,
@@ -161,7 +161,7 @@ func (h *ComplaintController) AddAttachment(c *gin.Context) {
 		return
 	}
 
-	h.db.Preload("Histories").Preload("Attachments").First(&complaint, complaint.ID)
+	h.db.Preload("Histories").Preload("Attachments").First(&complaint, complaint.ComplaintID)
 	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(&complaint))
 }
 
@@ -183,7 +183,7 @@ func (h *ComplaintController) AddHistory(c *gin.Context) {
 	}
 
 	history := &models.ComplaintHistory{
-		ComplaintID:  complaint.ID,
+		ComplaintID:  complaint.ComplaintID,
 		Status:       payload.Status,
 		ActionByRole: "admin",
 		Note:         payload.Note,
@@ -197,15 +197,15 @@ func (h *ComplaintController) AddHistory(c *gin.Context) {
 	if payload.Status == "resolved" {
 		complaint.ResolutionDetail = payload.Note
 	}
-	h.db.Model(&models.Complaint{}).Where("id = ?", complaint.ID).Update("resolution_detail", complaint.ResolutionDetail)
+	h.db.Model(&models.Complaint{}).Where("id = ?", complaint.ComplaintID).Update("resolution_detail", complaint.ResolutionDetail)
 
 	var submitter models.User
 	if h.db.First(&submitter, complaint.UserID).Error == nil {
-		notifyUser(h.db, submitter.ID, "อัปเดตสถานะข้อร้องเรียน", "complaint_status",
+		notifyUser(h.db, submitter.UserID, "อัปเดตสถานะข้อร้องเรียน", "complaint_status",
 			"เรื่องร้องเรียน \""+complaint.Title+"\" อัปเดตสถานะแล้ว")
 	}
 
-	h.db.Preload("Histories").Preload("Attachments").First(complaint, complaint.ID)
+	h.db.Preload("Histories").Preload("Attachments").First(complaint, complaint.ComplaintID)
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(complaint))
 }
 
@@ -244,7 +244,7 @@ func (h *ComplaintController) mapToResponse(complaint *models.Complaint) dto.Com
 	histories := make([]dto.ComplaintHistoryResponse, 0, len(complaint.Histories))
 	for _, hst := range complaint.Histories {
 		histories = append(histories, dto.ComplaintHistoryResponse{
-			ID:           hst.ID,
+			ID:           hst.ComplaintHistoryID,
 			Status:       hst.Status,
 			ActionByRole: hst.ActionByRole,
 			Note:         hst.Note,
@@ -262,7 +262,7 @@ func (h *ComplaintController) mapToResponse(complaint *models.Complaint) dto.Com
 	}
 
 	return dto.ComplaintResponse{
-		ID:               complaint.ID,
+		ID:               complaint.ComplaintID,
 		Title:            complaint.Title,
 		Description:      complaint.Description,
 		ReferenceType:    complaint.ReferenceType,

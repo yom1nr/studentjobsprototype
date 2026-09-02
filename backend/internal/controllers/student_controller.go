@@ -111,7 +111,7 @@ func (h *StudentController) findByUserID(userID uint) (*models.Student, error) {
 
 func mapStudentToResponse(student *models.Student) *dto.StudentProfileResponse {
     return &dto.StudentProfileResponse{
-        ID:         student.ID,
+        ID:         student.UserID,
         UserID:     student.UserID,
         FirstName:  student.FirstName,
         LastName:   student.LastName,

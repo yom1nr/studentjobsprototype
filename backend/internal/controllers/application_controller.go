@@ -58,7 +58,7 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
     }
 
     var existing models.Application
-    err := h.db.Where("student_id = ? AND jobpost_id = ?", student.ID, payload.JobpostID).First(&existing).Error
+    err := h.db.Where("student_id = ? AND jobpost_id = ?", student.UserID, payload.JobpostID).First(&existing).Error
     if err == nil {
         utils.JSONError(c, http.StatusBadRequest, "create failed", "you have already applied to this job post")
         return
@@ -69,7 +69,7 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
 
     now := time.Now().UTC()
     application := &models.Application{
-        StudentID: student.ID,
+        StudentID: student.UserID,
         JobpostID: payload.JobpostID,
         ApplyDate: &now,
         Remarks:   payload.Remarks,
@@ -82,7 +82,7 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
     application.Jobpost = jobpost
 
     var employer models.Employer
-    h.db.Select("company_name").First(&employer, jobpost.EmployerID)
+    h.db.Select("company_name").First(&employer, jobpost.UserID)
 
     utils.JSONSuccess(c, http.StatusCreated, mapApplicationToResponse(application, employer.CompanyName, "", "", "", ""))
 }
@@ -95,7 +95,7 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
     }
 
     var applications []models.Application
-    if err := h.db.Preload("Jobpost").Where("student_id = ?", student.ID).Order("created_at DESC").Find(&applications).Error; err != nil {
+    if err := h.db.Preload("Jobpost").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&applications).Error; err != nil {
         utils.JSONError(c, http.StatusInternalServerError, "failed to load applications", err.Error())
         return
     }
@@ -103,7 +103,7 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
     responses := make([]dto.ApplicationResponse, 0, len(applications))
     for i := range applications {
         var employer models.Employer
-        h.db.Select("company_name").First(&employer, applications[i].Jobpost.EmployerID)
+        h.db.Select("company_name").First(&employer, applications[i].Jobpost.UserID)
         responses = append(responses, mapApplicationToResponse(&applications[i], employer.CompanyName, "", "", "", ""))
     }
     utils.JSONSuccess(c, http.StatusOK, responses)
@@ -117,7 +117,7 @@ func (h *ApplicationController) ListEmployerApplications(c *gin.Context) {
     }
 
     var jobpostIDs []uint
-    h.db.Model(&models.Jobpost{}).Where("employer_id = ?", employer.ID).Pluck("id", &jobpostIDs)
+    h.db.Model(&models.Jobpost{}).Where("user_id = ?", employer.UserID).Pluck("jobpost_id", &jobpostIDs)
 
     var applications []models.Application
     query := h.db.Preload("Jobpost").Order("created_at DESC")
@@ -145,7 +145,7 @@ func (h *ApplicationController) GetEmployerApplicationDetail(c *gin.Context) {
     if !ok {
         return
     }
-    application, ok := h.ownedByEmployer(c, employer.ID)
+    application, ok := h.ownedByEmployer(c, employer.UserID)
     if !ok {
         return
     }
@@ -160,7 +160,7 @@ func (h *ApplicationController) ReviewApplication(c *gin.Context) {
     if !ok {
         return
     }
-    application, ok := h.ownedByEmployer(c, employer.ID)
+    application, ok := h.ownedByEmployer(c, employer.UserID)
     if !ok {
         return
     }
@@ -176,7 +176,7 @@ func (h *ApplicationController) ReviewApplication(c *gin.Context) {
     }
 
     audit := &models.ApplicationAudit{
-        ApplicationID: application.ID,
+        ApplicationID: application.ApplicationID,
         ResultStatus:  payload.ResultStatus,
         Comment:       payload.Comment,
         CheckedAt:     time.Now().UTC(),
@@ -230,7 +230,7 @@ func (h *ApplicationController) ListAdminApplications(c *gin.Context) {
     responses := make([]dto.AdminApplicationResponse, 0, len(applications))
     for i := range applications {
         var employer models.Employer
-        h.db.Select("company_name").First(&employer, applications[i].Jobpost.EmployerID)
+        h.db.Select("company_name").First(&employer, applications[i].Jobpost.UserID)
         name, university, _, _ := h.studentDisplayFields(applications[i].StudentID)
         responses = append(responses, mapAdminApplicationToResponse(&applications[i], employer.CompanyName, name, university))
     }
@@ -246,7 +246,7 @@ func (h *ApplicationController) GetAdminApplicationDetail(c *gin.Context) {
     }
 
     var employer models.Employer
-    h.db.Select("company_name").First(&employer, application.Jobpost.EmployerID)
+    h.db.Select("company_name").First(&employer, application.Jobpost.UserID)
     name, university, _, _ := h.studentDisplayFields(application.StudentID)
     utils.JSONSuccess(c, http.StatusOK, mapAdminApplicationToResponse(application, employer.CompanyName, name, university))
 }
@@ -275,8 +275,8 @@ func (h *ApplicationController) VerifyApplication(c *gin.Context) {
     }
 
     audit := &models.ApplicationAudit{
-        ApplicationID: application.ID,
-        AdminID:       &admin.ID,
+        ApplicationID: application.ApplicationID,
+        AdminID:       &admin.UserID,
         ResultStatus:  payload.ResultStatus,
         Comment:       payload.Comment,
         CheckedAt:     time.Now().UTC(),
@@ -298,7 +298,7 @@ func (h *ApplicationController) VerifyApplication(c *gin.Context) {
     notifyUser(h.db, student.UserID, "ผลการตรวจสอบใบสมัครงาน", "application_verification", message)
 
     var employer models.Employer
-    h.db.Select("company_name").First(&employer, application.Jobpost.EmployerID)
+    h.db.Select("company_name").First(&employer, application.Jobpost.UserID)
     name, university, _, _ := h.studentDisplayFields(application.StudentID)
     utils.JSONSuccess(c, http.StatusOK, mapAdminApplicationToResponse(application, employer.CompanyName, name, university))
 }
@@ -399,7 +399,7 @@ func (h *ApplicationController) ownedByEmployer(c *gin.Context, employerID uint)
         }
         return nil, false
     }
-    if application.Jobpost.EmployerID != employerID {
+    if application.Jobpost.UserID != employerID {
         utils.JSONError(c, http.StatusNotFound, "application not found", "no application exists with the given id")
         return nil, false
     }
@@ -431,7 +431,7 @@ func mapApplicationToResponse(app *models.Application, companyName, studentName,
     }
 
     return dto.ApplicationResponse{
-        ID:                app.ID,
+        ID:                app.ApplicationID,
         JobpostID:         app.JobpostID,
         Position:          app.Jobpost.Position,
         CompanyName:       companyName,
@@ -460,7 +460,7 @@ func mapAdminApplicationToResponse(app *models.Application, companyName, student
     }
 
     return dto.AdminApplicationResponse{
-        ID:                app.ID,
+        ID:                app.ApplicationID,
         JobpostID:         app.JobpostID,
         Position:          app.Jobpost.Position,
         CompanyName:       companyName,

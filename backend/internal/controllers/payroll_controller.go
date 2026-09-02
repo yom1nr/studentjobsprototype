@@ -45,7 +45,7 @@ func (h *PayrollController) CreatePayroll(c *gin.Context) {
 	}
 
 	var agreement models.EmploymentAgreement
-	if err := h.db.Where("id = ? AND employer_id = ? AND status = ?", payload.EmploymentAgreementID, employer.ID, "accepted").First(&agreement).Error; err != nil {
+	if err := h.db.Where("agreement_id = ? AND employer_id = ? AND status = ?", payload.EmploymentAgreementID, employer.UserID, "accepted").First(&agreement).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "agreement not found", "no accepted agreement exists with the given id for your account")
 		return
 	}
@@ -73,20 +73,19 @@ func (h *PayrollController) CreatePayroll(c *gin.Context) {
 	netPay := totalHours * agreement.WageRate
 
 	payroll := &models.Payroll{
-		EmploymentAgreementID: agreement.ID,
-		EmployerID:            employer.ID,
-		CycleStartDate:        &start,
-		CycleEndDate:          &end,
-		TotalHours:            totalHours,
-		NetPayAmount:          netPay,
-		PaymentStatus:         "pending",
+		AgreementID:    agreement.AgreementID,
+		CycleStartDate: &start,
+		CycleEndDate:   &end,
+		TotalHours:     totalHours,
+		NetPayAmount:   netPay,
+		PaymentStatus:  "pending",
 	}
 	if err := h.db.Create(payroll).Error; err != nil {
 		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
 		return
 	}
 	payslip := &models.Payslip{
-		PayrollID:          payroll.ID,
+		PayrollID:          payroll.PayrollID,
 		StudentID:          agreement.StudentID,
 		IsStudentConfirmed: false,
 	}
@@ -105,7 +104,7 @@ func (h *PayrollController) ApprovePayroll(c *gin.Context) {
 	if !ok {
 		return
 	}
-	payroll, ok := h.ownedByEmployer(c, employer.ID)
+	payroll, ok := h.ownedByEmployer(c, employer.UserID)
 	if !ok {
 		return
 	}
@@ -121,17 +120,17 @@ func (h *PayrollController) ApprovePayroll(c *gin.Context) {
 	}
 
 	now := time.Now().UTC()
-	h.db.Model(&models.Payslip{}).Where("payroll_id = ?", payroll.ID).Update("transfer_date_time", &now)
+	h.db.Model(&models.Payslip{}).Where("payroll_id = ?", payroll.PayrollID).Update("transfer_date_time", &now)
 
 	var agreement models.EmploymentAgreement
-	h.db.First(&agreement, payroll.EmploymentAgreementID)
+	h.db.First(&agreement, payroll.AgreementID)
 	var student models.Student
 	if h.db.First(&student, agreement.StudentID).Error == nil {
 		notifyUser(h.db, student.UserID, "โอนค่าตอบแทนแล้ว", "payroll_paid",
 			fmt.Sprintf("ได้รับการโอนค่าตอบแทน %.2f บาท กรุณายืนยันการรับเงิน", payroll.NetPayAmount))
 	}
 
-	h.db.Preload("Payslip").First(payroll, payroll.ID)
+	h.db.Preload("Payslip").First(payroll, payroll.PayrollID)
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(payroll, employer.CompanyName, h.studentName(agreement.StudentID)))
 }
 
@@ -151,14 +150,17 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := h.db.Preload("Payslip").Where("employer_id = ?", employer.ID).Order("created_at DESC").Find(&payrolls).Error; err != nil {
+		if err := h.db.Preload("Payslip").
+			Joins("JOIN employment_agreements ON employment_agreements.id = payrolls.agreement_id").
+			Where("employment_agreements.employer_id = ?", employer.UserID).
+			Order("payrolls.created_at DESC").Find(&payrolls).Error; err != nil {
 			utils.JSONError(c, http.StatusInternalServerError, "failed to load payrolls", err.Error())
 			return
 		}
 		responses := make([]dto.PayrollResponse, 0, len(payrolls))
 		for i := range payrolls {
 			var agreement models.EmploymentAgreement
-			h.db.First(&agreement, payrolls[i].EmploymentAgreementID)
+			h.db.First(&agreement, payrolls[i].AgreementID)
 			responses = append(responses, h.mapToResponse(&payrolls[i], employer.CompanyName, h.studentName(agreement.StudentID)))
 		}
 		utils.JSONSuccess(c, http.StatusOK, responses)
@@ -170,14 +172,16 @@ func (h *PayrollController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
-	if err := h.db.Preload("Payslip").Joins("JOIN payslips ON payslips.payroll_id = payrolls.id").
-		Where("payslips.student_id = ?", student.ID).Order("payrolls.created_at DESC").Find(&payrolls).Error; err != nil {
+	if err := h.db.Preload("Payslip").Joins("JOIN payslips ON payslips.payroll_id = payrolls.payroll_id").
+		Where("payslips.student_id = ?", student.UserID).Order("payrolls.created_at DESC").Find(&payrolls).Error; err != nil {
 		utils.JSONError(c, http.StatusInternalServerError, "failed to load payrolls", err.Error())
 		return
 	}
 	responses := make([]dto.PayrollResponse, 0, len(payrolls))
 	for i := range payrolls {
-		responses = append(responses, h.mapToResponse(&payrolls[i], h.companyName(payrolls[i].EmployerID), h.studentName(student.ID)))
+		var agreement models.EmploymentAgreement
+		h.db.First(&agreement, payrolls[i].AgreementID)
+		responses = append(responses, h.mapToResponse(&payrolls[i], h.companyName(agreement.EmployerID), h.studentName(student.UserID)))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -205,7 +209,7 @@ func (h *PayrollController) ConfirmReceipt(c *gin.Context) {
 		utils.JSONError(c, http.StatusNotFound, "payroll not found", "no payroll cycle exists with the given id")
 		return
 	}
-	if payroll.Payslip == nil || payroll.Payslip.StudentID != student.ID {
+	if payroll.Payslip == nil || payroll.Payslip.StudentID != student.UserID {
 		utils.JSONError(c, http.StatusNotFound, "payroll not found", "no payroll cycle exists with the given id")
 		return
 	}
@@ -214,16 +218,18 @@ func (h *PayrollController) ConfirmReceipt(c *gin.Context) {
 		return
 	}
 
-	h.db.Model(&models.Payslip{}).Where("payroll_id = ?", payroll.ID).Update("is_student_confirmed", true)
+	h.db.Model(&models.Payslip{}).Where("payroll_id = ?", payroll.PayrollID).Update("is_student_confirmed", true)
 
+	var agreement models.EmploymentAgreement
+	h.db.First(&agreement, payroll.AgreementID)
 	var employer models.Employer
-	if h.db.First(&employer, payroll.EmployerID).Error == nil {
+	if h.db.First(&employer, agreement.EmployerID).Error == nil {
 		notifyUser(h.db, employer.UserID, "นักศึกษายืนยันรับเงินแล้ว", "payroll_confirmed",
-			fmt.Sprintf("%s ยืนยันการรับเงิน %.2f บาทแล้ว", h.studentName(student.ID), payroll.NetPayAmount))
+			fmt.Sprintf("%s ยืนยันการรับเงิน %.2f บาทแล้ว", h.studentName(student.UserID), payroll.NetPayAmount))
 	}
 
-	h.db.Preload("Payslip").First(&payroll, payroll.ID)
-	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(&payroll, h.companyName(payroll.EmployerID), h.studentName(student.ID)))
+	h.db.Preload("Payslip").First(&payroll, payroll.PayrollID)
+	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(&payroll, h.companyName(agreement.EmployerID), h.studentName(student.UserID)))
 }
 
 func (h *PayrollController) currentEmployer(c *gin.Context) (*models.Employer, bool) {
@@ -244,6 +250,9 @@ func (h *PayrollController) currentEmployer(c *gin.Context) (*models.Employer, b
 	return &employer, true
 }
 
+// ownedByEmployer loads a payroll cycle, scoped to the current employer via its
+// EmploymentAgreement (Payroll no longer stores EmployerID directly, per the
+// B6729875 class diagram -- the employer is reached through AgreementID).
 func (h *PayrollController) ownedByEmployer(c *gin.Context, employerID uint) (*models.Payroll, bool) {
 	id, err := utils.ParseUintParam(c, "id")
 	if err != nil {
@@ -251,7 +260,10 @@ func (h *PayrollController) ownedByEmployer(c *gin.Context, employerID uint) (*m
 		return nil, false
 	}
 	var payroll models.Payroll
-	if err := h.db.Preload("Payslip").Where("id = ? AND employer_id = ?", id, employerID).First(&payroll).Error; err != nil {
+	if err := h.db.Preload("Payslip").
+		Joins("JOIN employment_agreements ON employment_agreements.id = payrolls.agreement_id").
+		Where("payrolls.payroll_id = ? AND employment_agreements.employer_id = ?", id, employerID).
+		First(&payroll).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "payroll not found", "no payroll cycle exists with the given id")
 		return nil, false
 	}
@@ -296,12 +308,16 @@ func (h *PayrollController) mapToResponse(p *models.Payroll, companyName, studen
 	if p.TotalHours > 0 {
 		rate = p.NetPayAmount / p.TotalHours
 	}
+
+	var agreement models.EmploymentAgreement
+	h.db.Select("employer_id").First(&agreement, p.AgreementID)
+
 	return dto.PayrollResponse{
-		ID:                    p.ID,
-		EmploymentAgreementID: p.EmploymentAgreementID,
+		ID:                    p.PayrollID,
+		EmploymentAgreementID: p.AgreementID,
 		StudentID:             studentID,
 		StudentName:           studentName,
-		EmployerID:            p.EmployerID,
+		EmployerID:            agreement.EmployerID,
 		CompanyName:           companyName,
 		CycleStartDate:        start,
 		CycleEndDate:          end,

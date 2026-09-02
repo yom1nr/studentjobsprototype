@@ -12,6 +12,7 @@ type User struct {
 	Email    string `gorm:"size:150;uniqueIndex;not null" json:"email"`
 	Phone    string `gorm:"size:20" json:"phone"`
 	Gender   string `gorm:"size:20" json:"gender"`
+	Avatar   string `gorm:"type:text" json:"avatar"`
 	Role     string `gorm:"size:20;not null;default:'student'" json:"role"` // student | employer | admin
 
 	// 1-to-1 Profiles

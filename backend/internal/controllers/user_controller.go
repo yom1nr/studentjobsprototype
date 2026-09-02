@@ -114,6 +114,9 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
     if payload.Gender != "" {
         user.Gender = payload.Gender
     }
+    if payload.Avatar != "" {
+        user.Avatar = payload.Avatar
+    }
 
     user.UpdatedAt = time.Now().UTC()
     if err := h.db.Save(user).Error; err != nil {
@@ -224,6 +227,7 @@ func mapUserToResponse(user *models.User) *dto.UserResponse {
         Email:     user.Email,
         Phone:     user.Phone,
         Gender:    user.Gender,
+        Avatar:    user.Avatar,
         Role:      user.Role,
         CreatedAt: user.CreatedAt.Format(time.RFC3339),
         UpdatedAt: user.UpdatedAt.Format(time.RFC3339),

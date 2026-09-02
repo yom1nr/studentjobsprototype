@@ -97,7 +97,7 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
 		}
 	}
 
-	// Update base User model fields (phone, gender)
+	// Update base User model fields (phone, gender, avatar)
 	var user models.User
 	if err := h.db.First(&user, userID).Error; err == nil {
 		updatedUser := false
@@ -107,6 +107,10 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
 		}
 		if payload.Phone != "" && payload.Phone != user.Phone {
 			user.Phone = payload.Phone
+			updatedUser = true
+		}
+		if payload.ProfileImage != "" && payload.ProfileImage != user.Avatar {
+			user.Avatar = payload.ProfileImage
 			updatedUser = true
 		}
 		if updatedUser {

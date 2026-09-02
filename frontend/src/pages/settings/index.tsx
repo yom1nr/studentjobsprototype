@@ -1118,6 +1118,56 @@ function StudentSettingsView() {
           ))}
         </Box>
 
+        {activeTab === 'info' && (
+          <Box sx={{ mb: 3, pb: 3, borderBottom: '1px solid #E8E8E8', display: 'flex', alignItems: 'center', gap: 3 }}>
+            <Avatar
+              src={user?.avatar}
+              sx={{
+                width: 90,
+                height: 90,
+                bgcolor: colors.field,
+                color: colors.navy,
+                fontSize: 36,
+                fontWeight: 700,
+                border: `2px solid ${colors.navy}`,
+              }}
+            >
+              {user?.user_name ? user.user_name.charAt(0).toUpperCase() : '?'}
+            </Avatar>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>
+                {profile.firstName} {profile.lastName}
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: '#697077', mb: 1 }}>
+                {user?.email}
+              </Typography>
+              <Button
+                component="label"
+                size="small"
+                startIcon={<UploadOutlinedIcon />}
+                disabled={avatarUploading}
+                sx={{
+                  borderRadius: '20px',
+                  textTransform: 'none',
+                  bgcolor: 'rgba(1, 33, 80, 0.08)',
+                  color: colors.navy,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  '&:hover': { bgcolor: 'rgba(1, 33, 80, 0.16)' },
+                }}
+              >
+                {avatarUploading ? 'กำลังอัปโหลด...' : 'เปลี่ยนรูปโปรไฟล์'}
+                <input
+                  type="file"
+                  hidden
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => void handleAvatarUpload(e)}
+                />
+              </Button>
+            </Box>
+          </Box>
+        )}
+
         {activeTab === 'info' &&
           (editing ? (
             <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3, alignItems: 'center' }}>

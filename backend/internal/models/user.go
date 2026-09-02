@@ -36,6 +36,8 @@ type Student struct {
 	Major       string     `gorm:"size:150" json:"major"`
 	Years       string     `gorm:"size:10" json:"years"`
 	Skill       string     `gorm:"type:text" json:"skill"`
+	AvailableTime string   `gorm:"type:text" json:"available_time"`
+	ProfileImage  string   `gorm:"type:text" json:"profile_image"`
 	CreatedAt   time.Time  `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
 }

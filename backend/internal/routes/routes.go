@@ -65,6 +65,7 @@ func SetupRouter(
     student.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("student"))
     student.GET("/profile", studentHandler.GetMyProfile)
     student.PUT("/profile", studentHandler.UpsertMyProfile)
+    student.POST("/schedule/extract", studentHandler.ExtractScheduleFromImage)
     student.GET("/applications", applicationHandler.ListMyApplications)
     student.POST("/applications", applicationHandler.CreateApplication)
 

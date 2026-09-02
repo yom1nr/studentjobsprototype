@@ -5,6 +5,8 @@ export type StudentProfile = {
   last_name: string
   date_of_birth?: string
   age?: number
+  gender?: string
+  phone?: string
   address: string
   university: string
   faculty: string
@@ -12,6 +14,7 @@ export type StudentProfile = {
   years: string
   skill: string
   available_time?: string
+  profile_image?: string
   created_at: string
   updated_at: string
 }
@@ -20,6 +23,8 @@ export type UpsertStudentProfileRequest = {
   first_name: string
   last_name: string
   date_of_birth?: string
+  gender?: string
+  phone?: string
   address?: string
   university?: string
   faculty?: string
@@ -27,6 +32,7 @@ export type UpsertStudentProfileRequest = {
   years?: string
   skill?: string
   available_time?: string
+  profile_image?: string
 }
 
 export type TimeSlot = {
@@ -39,4 +45,3 @@ export type ExtractScheduleResponse = {
   class_slots: TimeSlot[]
   free_slots?: TimeSlot[]
 }
-

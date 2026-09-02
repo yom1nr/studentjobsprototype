@@ -736,7 +736,7 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
   return {
     firstName: api?.first_name ?? account.userName,
     lastName: api?.last_name ?? '',
-    gender: account.gender,
+    gender: api?.gender || account.gender,
     dateOfBirth: dob,
     age: ageVal,
     address: api?.address ?? '',
@@ -744,6 +744,7 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
     faculty: api?.faculty ?? '',
     major: api?.major ?? '',
     year: api?.years ?? '',
+    phone: api?.phone || account.phone,
     skills: api?.skill ?? '',
     availableTime: api?.available_time ?? '',
   }
@@ -978,6 +979,8 @@ function StudentSettingsView() {
         first_name: draft.firstName.trim(),
         last_name: draft.lastName.trim(),
         date_of_birth: draft.dateOfBirth.trim() || undefined,
+        gender: draft.gender.trim() || undefined,
+        phone: draft.phone.trim() || undefined,
         address: draft.address.trim() || undefined,
         university: draft.university.trim() || undefined,
         faculty: draft.faculty.trim() || undefined,
@@ -989,7 +992,7 @@ function StudentSettingsView() {
       if (draft.phone.trim() !== (user?.phone ?? '') || draft.gender.trim() !== (user?.gender ?? '')) {
         await updateProfile({ phone: draft.phone.trim() || undefined, gender: draft.gender.trim() || undefined })
       }
-      setProfile(apiToLocalStudentProfile(api, { userName: user?.user_name ?? '', phone: draft.phone.trim(), gender: draft.gender.trim() }))
+      setProfile(apiToLocalStudentProfile(api, { userName: user?.user_name ?? '', phone: api.phone || draft.phone.trim(), gender: api.gender || draft.gender.trim() }))
       setEditing(false)
       setSavedNotice(true)
     } catch (err) {

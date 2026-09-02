@@ -11,6 +11,7 @@ type Jobpost struct {
 	JobpostID       uint      `gorm:"primaryKey;autoIncrement" json:"jobpost_id"`
 	UserID          uint      `gorm:"not null;index" json:"user_id"`
 	JobID           string    `gorm:"size:150;not null" json:"job_id"`
+	CompanyName     string    `gorm:"size:255" json:"company_name"`
 	Position        string    `gorm:"size:150;not null" json:"position"`
 	JobType         string    `gorm:"size:100" json:"job_type"`
 	JobDescription  string    `gorm:"type:text" json:"job_description"`

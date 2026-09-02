@@ -247,10 +247,12 @@ func (h *JobpostController) findByID(id uint) (*models.Jobpost, error) {
 }
 
 func (h *JobpostController) mapWithCompanyName(jobpost *models.Jobpost) dto.JobpostResponse {
-    var employer models.Employer
-    companyName := ""
-    if err := h.db.Select("company_name").First(&employer, jobpost.UserID).Error; err == nil {
-        companyName = employer.CompanyName
+    companyName := jobpost.CompanyName
+    if companyName == "" {
+        var employer models.Employer
+        if err := h.db.Select("company_name").First(&employer, jobpost.UserID).Error; err == nil {
+            companyName = employer.CompanyName
+        }
     }
     return mapJobpostToResponse(jobpost, companyName)
 }

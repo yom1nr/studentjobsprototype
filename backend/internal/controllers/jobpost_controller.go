@@ -254,7 +254,7 @@ func (h *JobpostController) DeleteJobpost(c *gin.Context) {
         }
         return tx.Delete(&models.Jobpost{}, jobpost.JobpostID).Error
     }); err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "delete failed", err.Error())
+        utils.JSONInternalError(c, "delete failed", err)
         return
     }
 

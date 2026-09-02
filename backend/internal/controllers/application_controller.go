@@ -359,7 +359,7 @@ func (h *ApplicationController) DeleteApplication(c *gin.Context) {
         }
         return tx.Delete(&models.Application{}, application.ApplicationID).Error
     }); err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "delete failed", err.Error())
+        utils.JSONInternalError(c, "delete failed", err)
         return
     }
 

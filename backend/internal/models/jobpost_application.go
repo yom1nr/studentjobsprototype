@@ -4,9 +4,10 @@ import (
 	"time"
 )
 
-// Jobpost is a job listing created by an Employer. Period is free text (e.g.
-// "3 เดือน") per the actual create/edit design, not a date — the class
-// diagram typed it as dateTime, but the UI never shows a date picker for it.
+// Jobpost is a job listing created by an Employer. Period is the working-time
+// schedule as free text (e.g. "จันทร์-ศุกร์ 17:00-23:00") — the create/edit form
+// shows a plain text field, and the FR5 job-search filter keyword-matches it.
+// DateStart is kept for backwards compatibility but is no longer shown in the UI.
 type Jobpost struct {
 	JobpostID      uint       `gorm:"primaryKey;autoIncrement" json:"jobpost_id"`
 	UserID         uint       `gorm:"not null;index" json:"user_id"`
@@ -16,12 +17,17 @@ type Jobpost struct {
 	JobDescription string     `gorm:"type:text" json:"job_description"`
 	DateStart      *time.Time `json:"date_start"`
 	Wage           float64    `gorm:"type:decimal(10,2)" json:"wage"`
-	Period         string     `gorm:"size:100" json:"period"`
+	Period         string     `gorm:"size:255" json:"period"` // working-time schedule (text)
 	Location       string     `gorm:"size:255" json:"location"`
 	Welfare        string     `gorm:"type:text" json:"welfare"`
-	Property       string     `gorm:"size:255" json:"property"`
-	Quantity       int        `gorm:"default:1" json:"quantity"`
-	Status         string     `gorm:"size:50;not null;default:'open'" json:"status"` // open | closed | draft
+	Property       string     `gorm:"type:text" json:"property"` // main qualifications, one per line
+
+	// AdditionalQualification is the "คุณสมบัติเพิ่มเติม" section shown to
+	// students, one item per line. Optional.
+	AdditionalQualification string `gorm:"type:text" json:"additional_qualification"`
+
+	Quantity int    `gorm:"default:1" json:"quantity"`
+	Status   string `gorm:"size:50;not null;default:'open'" json:"status"` // open | closed | draft
 
 	// Relations. User is left to convention for the same reason as Application.Jobpost
 	// below — User's primary key is also named UserID, so naming the foreign key here

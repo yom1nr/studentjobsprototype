@@ -227,6 +227,23 @@ function OutcomeDialog({
   )
 }
 
+// Renders a text field where the employer typed one item per line as a
+// bulleted list. Falls back to a single line for plain text.
+function DetailSection({ title, text }: Readonly<{ title: string; text: string }>) {
+  const items = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (items.length === 0) return null
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>{title}</Typography>
+      <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+        {items.map((it, i) => (
+          <Typography component="li" key={i} sx={{ fontSize: 13, color: '#333' }}>{it}</Typography>
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
 function JobDetailDialog({
   job,
   onClose,
@@ -259,36 +276,27 @@ function JobDetailDialog({
 
           <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
             {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px' }} />}
-            {job.period && <Chip label={job.period} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px' }} />}
           </Box>
 
-          {job.job_description && (
+          <DetailSection title="รายละเอียดงาน" text={job.job_description} />
+          <DetailSection title="คุณสมบัติหลัก" text={job.property} />
+
+          {job.period && (
             <Box sx={{ mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>ลักษณะงาน</Typography>
-              <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{job.job_description}</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+                <AccessTimeOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
+                <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>เวลาทำงาน</Typography>
+              </Box>
+              <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line', pl: 3.25 }}>{job.period}</Typography>
             </Box>
           )}
 
-          {job.property && (
-            <Box sx={{ mb: 2 }}>
-              <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>คุณสมบัติผู้สมัคร</Typography>
-              <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{job.property}</Typography>
-            </Box>
-          )}
+          <DetailSection title="คุณสมบัติเพิ่มเติม" text={job.additional_qualification} />
 
           {job.welfare && (
             <Box sx={{ mb: 2 }}>
               <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>สวัสดิการ</Typography>
               <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{job.welfare}</Typography>
-            </Box>
-          )}
-
-          {job.date_start && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 3 }}>
-              <AccessTimeOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-              <Typography sx={{ fontSize: 13, color: colors.navy }}>
-                เริ่มงาน {new Date(job.date_start).toLocaleDateString('th-TH')}
-              </Typography>
             </Box>
           )}
 
@@ -537,10 +545,9 @@ type JobFormState = {
   welfare: string
   jobDescription: string
   property: string
+  additionalQualification: string
   wage: string
   quantity: number
-  dateStart: string
-  timeStart: string
   period: string
 }
 
@@ -551,15 +558,13 @@ const EMPTY_JOB_FORM: JobFormState = {
   welfare: '',
   jobDescription: '',
   property: '',
+  additionalQualification: '',
   wage: '',
   quantity: 1,
-  dateStart: '',
-  timeStart: '',
   period: '',
 }
 
 function jobpostToForm(job: Jobpost): JobFormState {
-  const [datePart, timePart] = job.date_start ? job.date_start.split('T') : ['', '']
   return {
     position: job.position,
     jobType: job.job_type,
@@ -567,26 +572,24 @@ function jobpostToForm(job: Jobpost): JobFormState {
     welfare: job.welfare,
     jobDescription: job.job_description,
     property: job.property,
+    additionalQualification: job.additional_qualification,
     wage: String(job.wage),
     quantity: job.quantity || 1,
-    dateStart: datePart,
-    timeStart: timePart ? timePart.slice(0, 5) : '',
     period: job.period,
   }
 }
 
 function formToPayload(form: JobFormState): UpsertJobpostRequest {
-  const dateStart = form.dateStart ? new Date(`${form.dateStart}T${form.timeStart || '00:00'}:00`).toISOString() : undefined
   return {
     position: form.position.trim(),
     job_type: form.jobType || undefined,
     job_description: form.jobDescription.trim() || undefined,
-    date_start: dateStart,
     wage: Number(form.wage) || 0,
     period: form.period.trim() || undefined,
     location: form.location.trim() || undefined,
     welfare: form.welfare.trim() || undefined,
     property: form.property.trim() || undefined,
+    additional_qualification: form.additionalQualification.trim() || undefined,
     quantity: form.quantity,
   }
 }
@@ -738,12 +741,12 @@ function EmployerJobPostingsView() {
                 ))}
               </TextField>
               <TextField
-                label="ลักษณะงาน"
-                placeholder="อธิบายลักษณะงาน"
+                label="รายละเอียดงาน"
+                placeholder={'อธิบายลักษณะงาน (พิมพ์ 1 บรรทัด = 1 ข้อ)\nเช่น\nให้บริการลูกค้าและรับออเดอร์\nจัดเตรียมโต๊ะและเก้าอี้'}
                 value={form.jobDescription}
                 onChange={(e) => setForm({ ...form, jobDescription: e.target.value })}
                 multiline
-                minRows={3}
+                minRows={4}
                 fullWidth
               />
               <TextField
@@ -756,26 +759,9 @@ function EmployerJobPostingsView() {
                 fullWidth
                 slotProps={{ input: { endAdornment: <InputAdornment position="end">บาท/ชั่วโมง</InputAdornment> } }}
               />
-              <Box>
-                <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy, mb: 0.75 }}>วันและเวลาที่ปฏิบัติงาน</Typography>
-                <Box sx={{ display: 'flex', gap: 1.5 }}>
-                  <TextField
-                    type="date"
-                    value={form.dateStart}
-                    onChange={(e) => setForm({ ...form, dateStart: e.target.value })}
-                    fullWidth
-                  />
-                  <TextField
-                    type="time"
-                    value={form.timeStart}
-                    onChange={(e) => setForm({ ...form, timeStart: e.target.value })}
-                    fullWidth
-                  />
-                </Box>
-              </Box>
               <TextField
-                label="ระยะเวลาจ้าง"
-                placeholder="เช่น 3 เดือน"
+                label="เวลาทำงาน"
+                placeholder="เช่น จันทร์-ศุกร์ 17:00-23:00 (เลือกวันทำงานได้)"
                 value={form.period}
                 onChange={(e) => setForm({ ...form, period: e.target.value })}
                 fullWidth
@@ -800,10 +786,21 @@ function EmployerJobPostingsView() {
                 fullWidth
               />
               <TextField
-                label="คุณสมบัติผู้สมัคร"
-                placeholder="ระบุคุณสมบัติของผู้สมัคร"
+                label="คุณสมบัติหลัก"
+                placeholder={'พิมพ์ 1 บรรทัด = 1 ข้อ\nเช่น\nอายุ 18 ปีขึ้นไป\nเพศชาย'}
                 value={form.property}
                 onChange={(e) => setForm({ ...form, property: e.target.value })}
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="คุณสมบัติเพิ่มเติม"
+                placeholder={'พิมพ์ 1 บรรทัด = 1 ข้อ\nเช่น\nตรงต่อเวลา\nบุคลิกภาพดี'}
+                value={form.additionalQualification}
+                onChange={(e) => setForm({ ...form, additionalQualification: e.target.value })}
+                multiline
+                minRows={3}
                 fullWidth
               />
               <Box>

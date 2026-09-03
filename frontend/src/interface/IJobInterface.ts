@@ -13,6 +13,7 @@ export type Jobpost = {
   location: string
   welfare: string
   property: string
+  additional_qualification: string
   quantity: number
   status: JobStatus
   created_at: string
@@ -28,6 +29,7 @@ export type UpsertJobpostRequest = {
   location?: string
   welfare?: string
   property?: string
+  additional_qualification?: string
   quantity?: number
 }
 

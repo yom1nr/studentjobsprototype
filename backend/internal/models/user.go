@@ -56,7 +56,8 @@ type Employer struct {
 	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
-	Approve *Approve `gorm:"foreignKey:UserID;references:UserID" json:"approve,omitempty"`
+	Approve            *Approve            `gorm:"foreignKey:UserID;references:UserID" json:"approve,omitempty"`
+	AttachmentEmployer *AttachmentEmployer `gorm:"foreignKey:UserID;references:UserID" json:"attachment_employer,omitempty"`
 }
 
 // Admin profile – linked to a User account (1-to-1).

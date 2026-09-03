@@ -145,6 +145,7 @@ func SetupRouter(
     admin.GET("/employers/:id", adminHandler.GetEmployerDetail)
     admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)
     admin.POST("/employers/:id/reject", adminHandler.RejectEmployer)
+    admin.POST("/employers/:id/request-document", adminHandler.RequestDocuments)
     admin.GET("/complaints", complaintHandler.ListAll)
     admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
 

@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../../../services/https'
 import { ErrorAlert } from '../../../components/ErrorAlert'
 import { useAuth } from '../../../auth/useAuth'
+import { uploadFile } from '../../../services/https/upload'
 import { upsertMyStudentProfile } from '../../../services/https/student'
 
 const colors = { navy: '#000349', bg: '#DAEAF7' }
@@ -77,7 +78,7 @@ const INITIAL: FormState = {
   skills: '',
 }
 
-function UploadSlot({ label }: Readonly<{ label: string }>) {
+function UploadSlot({ label, file, onPick }: Readonly<{ label: string; file: File | null; onPick: (f: File | null) => void }>) {
   return (
     <Box>
       <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.75 }}>{label}</Typography>
@@ -91,14 +92,21 @@ function UploadSlot({ label }: Readonly<{ label: string }>) {
           borderRadius: 3,
           p: 2,
           cursor: 'pointer',
+          bgcolor: file ? '#F0F8FF' : 'transparent',
           '&:hover': { bgcolor: '#F7FAFF' },
         }}
       >
-        <input type="file" accept=".pdf,.jpg,.jpeg,.png" hidden />
+        <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" hidden onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
         <CloudUploadOutlinedIcon sx={{ color: colors.navy }} />
-        <Box>
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>คลิกเพื่อเลือกไฟล์</Typography>
-          <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)</Typography>
+        <Box sx={{ minWidth: 0 }}>
+          {file ? (
+            <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#0088FF', wordBreak: 'break-all' }}>{file.name}</Typography>
+          ) : (
+            <>
+              <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>คลิกเพื่อเลือกไฟล์</Typography>
+              <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ PDF, JPG, PNG, WebP (ไม่เกิน 5MB)</Typography>
+            </>
+          )}
         </Box>
       </Box>
     </Box>
@@ -107,13 +115,19 @@ function UploadSlot({ label }: Readonly<{ label: string }>) {
 
 export default function RegisterStudentPage() {
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, updateProfile } = useAuth()
 
   const [step, setStep] = useState(1)
   const [form, setForm] = useState(INITIAL)
   const [agreed, setAgreed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [files, setFiles] = useState<{ profile: File | null; schedule: File | null; resume: File | null; transcript: File | null }>({
+    profile: null,
+    schedule: null,
+    resume: null,
+    transcript: null,
+  })
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -148,8 +162,9 @@ export default function RegisterStudentPage() {
         gender: form.gender || undefined,
         role: 'student',
       })
-      // Skills/resume/schedule/grade uploads stay UI-only — no file storage backend
-      // exists anywhere in this app yet — but the rest of the profile is now real.
+      // Upload the staged documents now that we have a token.
+      const up = async (f: File | null) => (f ? uploadFile(token, f) : undefined)
+      const [schedule, resume, transcript] = await Promise.all([up(files.schedule), up(files.resume), up(files.transcript)])
       await upsertMyStudentProfile(token, {
         first_name: form.firstName.trim(),
         last_name: form.lastName.trim(),
@@ -160,7 +175,14 @@ export default function RegisterStudentPage() {
         major: form.major.trim() || undefined,
         years: form.year.trim() || undefined,
         skill: form.skills.trim() || undefined,
+        schedule,
+        resume,
+        transcript,
       })
+      if (files.profile) {
+        const avatar = await uploadFile(token, files.profile)
+        await updateProfile({ avatar })
+      }
       navigate('/profile', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -365,11 +387,11 @@ export default function RegisterStudentPage() {
                 />
               </Box>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                <UploadSlot label="รูปโปรไฟล์" />
-                <UploadSlot label="อัปโหลด ตารางเรียน" />
+                <UploadSlot label="รูปโปรไฟล์" file={files.profile} onPick={(f) => setFiles((s) => ({ ...s, profile: f }))} />
+                <UploadSlot label="อัปโหลด ตารางเรียน" file={files.schedule} onPick={(f) => setFiles((s) => ({ ...s, schedule: f }))} />
               </Box>
-              <UploadSlot label="อัปโหลด เรซูเม่" />
-              <UploadSlot label="อัปโหลด เกรด" />
+              <UploadSlot label="อัปโหลด เรซูเม่" file={files.resume} onPick={(f) => setFiles((s) => ({ ...s, resume: f }))} />
+              <UploadSlot label="อัปโหลด เกรด (ทรานสคริปต์)" file={files.transcript} onPick={(f) => setFiles((s) => ({ ...s, transcript: f }))} />
             </Box>
 
             <FormControlLabel

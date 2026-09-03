@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../../../services/https'
 import { ErrorAlert } from '../../../components/ErrorAlert'
 import { useAuth } from '../../../auth/useAuth'
+import { uploadFile } from '../../../services/https/upload'
 import { upsertMyEmployerProfile } from '../../../services/https/employer'
 
 const colors = { navy: '#000349', bg: '#DAEAF7' }
@@ -65,7 +66,12 @@ const PAGE_SUBTITLE: Record<number, string> = {
   4: 'ตรวจสอบข้อมูลให้ถูกต้องก่อนส่งคำขอ',
 }
 
-function UploadCard({ label, camera }: Readonly<{ label: string; camera?: boolean }>) {
+function UploadCard({
+  label,
+  camera,
+  file,
+  onPick,
+}: Readonly<{ label: string; camera?: boolean; file: File | null; onPick: (f: File | null) => void }>) {
   return (
     <Box>
       <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.75 }}>{label}</Typography>
@@ -81,14 +87,25 @@ function UploadCard({ label, camera }: Readonly<{ label: string; camera?: boolea
           borderRadius: 3,
           p: 3,
           cursor: 'pointer',
+          bgcolor: file ? '#F0F8FF' : 'transparent',
           '&:hover': { bgcolor: '#F7FAFF' },
         }}
       >
-        <input type="file" accept=".pdf,.jpg,.jpeg,.png" hidden />
+        <input
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,.webp"
+          hidden
+          onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+        />
         {camera ? <PhotoCameraOutlinedIcon sx={{ color: colors.navy, fontSize: 32 }} /> : <CloudUploadOutlinedIcon sx={{ color: colors.navy, fontSize: 32 }} />}
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>คลิกเพื่อเลือกไฟล์</Typography>
-        <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>หรือ ลากไฟล์มาวางที่นี่</Typography>
-        <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)</Typography>
+        {file ? (
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#0088FF', wordBreak: 'break-all' }}>{file.name}</Typography>
+        ) : (
+          <>
+            <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>คลิกเพื่อเลือกไฟล์</Typography>
+            <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ PDF, JPG, PNG, WebP (ไม่เกิน 5MB)</Typography>
+          </>
+        )}
       </Box>
     </Box>
   )
@@ -105,13 +122,19 @@ function ReviewRow({ label, value }: Readonly<{ label: string; value: string }>)
 
 export default function RegisterEmployerPage() {
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, updateProfile } = useAuth()
 
   const [page, setPage] = useState(1)
   const [form, setForm] = useState(INITIAL)
   const [agreed, setAgreed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [files, setFiles] = useState<{ registration: File | null; logo: File | null; card: File | null; profile: File | null }>({
+    registration: null,
+    logo: null,
+    card: null,
+    profile: null,
+  })
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -148,6 +171,9 @@ export default function RegisterEmployerPage() {
         phone: form.phone.trim() || undefined,
         role: 'employer',
       })
+      // Upload the staged verification documents now that we have a token.
+      const up = async (f: File | null) => (f ? uploadFile(token, f) : undefined)
+      const [companyRegis, logo, cardId] = await Promise.all([up(files.registration), up(files.logo), up(files.card)])
       await upsertMyEmployerProfile(token, {
         first_name: form.contactFirstName.trim(),
         last_name: form.contactLastName.trim(),
@@ -158,7 +184,14 @@ export default function RegisterEmployerPage() {
         tax_id: form.taxId.trim(),
         link: form.website.trim() || undefined,
         company_address: form.address.trim() || undefined,
+        company_regis: companyRegis,
+        logo,
+        card_id: cardId,
       })
+      if (files.profile) {
+        const avatar = await uploadFile(token, files.profile)
+        await updateProfile({ avatar })
+      }
       navigate('/profile', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -254,10 +287,10 @@ export default function RegisterEmployerPage() {
         <Box sx={{ bgcolor: '#FFFFFF', borderRadius: 4, p: { xs: 3, md: 5 }, maxWidth: 900, mx: 'auto', boxShadow: '0px 8px 40px rgba(0,3,73,0.06)' }}>
           <StepHeading step={4} title="เอกสารยืนยันและข้อมูลเพิ่มเติม" />
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 3 }}>
-            <UploadCard label="หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า" />
-            <UploadCard label="โลโก้บริษัท / ร้านค้า (ถ้ามี)" />
-            <UploadCard label="บัตรประชาชนของผู้มีอำนาจลงนาม" />
-            <UploadCard label="รูปโปรไฟล์" camera />
+            <UploadCard label="หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า" file={files.registration} onPick={(f) => setFiles((s) => ({ ...s, registration: f }))} />
+            <UploadCard label="โลโก้บริษัท / ร้านค้า (ถ้ามี)" file={files.logo} onPick={(f) => setFiles((s) => ({ ...s, logo: f }))} />
+            <UploadCard label="บัตรประชาชนของผู้มีอำนาจลงนาม" file={files.card} onPick={(f) => setFiles((s) => ({ ...s, card: f }))} />
+            <UploadCard label="รูปโปรไฟล์" camera file={files.profile} onPick={(f) => setFiles((s) => ({ ...s, profile: f }))} />
           </Box>
         </Box>
       )}

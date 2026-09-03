@@ -15,6 +15,9 @@ export type StudentProfile = {
   skill: string
   available_time: string
   avatar: string
+  transcript: string
+  resume: string
+  schedule: string
   created_at: string
   updated_at: string
 }
@@ -33,4 +36,7 @@ export type UpsertStudentProfileRequest = {
   skill?: string
   available_time?: string
   avatar?: string
+  transcript?: string
+  resume?: string
+  schedule?: string
 }

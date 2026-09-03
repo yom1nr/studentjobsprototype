@@ -42,6 +42,8 @@ type Student struct {
 	AvailableTime string    `gorm:"type:text" json:"available_time"`
 	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	AttachmentStudent *AttachmentStudent `gorm:"foreignKey:UserID;references:UserID" json:"attachment_student,omitempty"`
 }
 
 // Employer profile – linked to a User account (1-to-1).

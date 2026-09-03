@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "log"
+    "os"
 
     "github.com/joho/godotenv"
 
@@ -42,6 +43,7 @@ func main() {
     timeRecordController := controllers.NewTimeRecordController(db)
     payrollController := controllers.NewPayrollController(db)
     complaintController := controllers.NewComplaintController(db)
+    uploadController := controllers.NewUploadController()
 
     router := routes.SetupRouter(
         authController,
@@ -57,7 +59,14 @@ func main() {
         timeRecordController,
         payrollController,
         complaintController,
+        uploadController,
     )
+
+    // Uploaded files are stored on disk and served read-only at /uploads.
+    if err := os.MkdirAll("uploads", 0o755); err != nil {
+        log.Printf("could not create uploads dir: %v", err)
+    }
+    router.Static("/uploads", "./uploads")
 
     port := cfg.ServerPort
     if port == "" {

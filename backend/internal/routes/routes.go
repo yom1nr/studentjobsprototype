@@ -22,6 +22,7 @@ func SetupRouter(
     timeRecordHandler *controllers.TimeRecordController,
     payrollHandler *controllers.PayrollController,
     complaintHandler *controllers.ComplaintController,
+    uploadHandler *controllers.UploadController,
 ) *gin.Engine {
     router := gin.New()
     // Recovery must be registered here (before any routes) so it actually wraps
@@ -34,6 +35,9 @@ func SetupRouter(
     auth := api.Group("/auth")
     auth.POST("/register", authHandler.Register)
     auth.POST("/login", authHandler.Login)
+
+    // File upload — any authenticated user (profile images, employer docs, evidence)
+    api.POST("/upload", middleware.JWTAuthMiddleware(), uploadHandler.UploadFile)
 
     // Private Routes
     users := api.Group("/users")

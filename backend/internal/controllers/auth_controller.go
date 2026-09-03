@@ -48,6 +48,10 @@ func (h *AuthController) Register(c *gin.Context) {
         utils.JSONError(c, http.StatusBadRequest, msgValidationError, err.Error())
         return
     }
+    if err := utils.ValidatePasswordStrength(payload.Password); err != nil {
+        utils.JSONError(c, http.StatusBadRequest, msgValidationError, err.Error())
+        return
+    }
 
     // Defence in depth: the DTO already rejects "admin", but never trust the
     // client for the role — an empty/omitted role registers as a student.
@@ -119,13 +123,13 @@ func (h *AuthController) Login(c *gin.Context) {
         return
     }
 
-    user, err := h.findByEmail(payload.Email)
+    user, err := h.findByIdentifier(payload.Email)
     if err != nil {
         utils.JSONInternalError(c, msgLoginFailed, err)
         return
     }
     if user == nil {
-        utils.JSONError(c, http.StatusUnauthorized, msgLoginFailed, "invalid email or password")
+        utils.JSONError(c, http.StatusUnauthorized, msgLoginFailed, "invalid email/username or password")
         return
     }
 
@@ -153,6 +157,20 @@ func (h *AuthController) Login(c *gin.Context) {
             UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
         },
     })
+}
+
+// findByIdentifier looks a user up by email or username, so people can sign in
+// with either.
+func (h *AuthController) findByIdentifier(identifier string) (*models.User, error) {
+    var user models.User
+    err := h.db.Where("email = ? OR user_name = ?", identifier, identifier).First(&user).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, nil
+        }
+        return nil, err
+    }
+    return &user, nil
 }
 
 func (h *AuthController) findByEmail(email string) (*models.User, error) {

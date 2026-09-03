@@ -107,11 +107,13 @@ export default function RegisterStudentPage() {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  const passwordOk = form.password.length >= 8 && /[a-zA-Z]/.test(form.password) && /[0-9]/.test(form.password)
+
   const step1Valid =
     form.studentId.trim().length > 0 &&
     form.userName.trim().length >= 2 &&
     form.email.trim().length > 0 &&
-    form.password.length >= 8 &&
+    passwordOk &&
     form.password === form.confirmPassword
 
   const step2Valid =

@@ -46,6 +46,7 @@ func main() {
     uploadController := controllers.NewUploadController()
 
     router := routes.SetupRouter(
+        db,
         authController,
         userController,
         employerController,

@@ -2,6 +2,7 @@ package routes
 
 import (
     "github.com/gin-gonic/gin"
+    "gorm.io/gorm"
 
     "github.com/SA/Golang-Backend-Example/internal/controllers"
     "github.com/SA/Golang-Backend-Example/internal/middleware"
@@ -9,6 +10,7 @@ import (
 
 // SetupRouter registers application routes and middleware.
 func SetupRouter(
+    db *gorm.DB,
     authHandler *controllers.AuthController,
     userHandler *controllers.UserController,
     employerHandler *controllers.EmployerController,
@@ -50,15 +52,18 @@ func SetupRouter(
     users.GET("/:id", middleware.RequireRole("admin"), userHandler.GetUserByID)
 
     // Employer's own company profile (submits/edits, triggers admin review)
+    // Gates employer *action* routes (not profile / read-only) on admin approval.
+    approvedEmployer := middleware.RequireApprovedEmployer(db)
+
     employer := api.Group("/employer")
     employer.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("employer"))
     employer.GET("/profile", employerHandler.GetMyProfile)
     employer.PUT("/profile", employerHandler.UpsertMyProfile)
     employer.GET("/jobposts", jobpostHandler.ListMyJobposts)
-    employer.POST("/jobposts", jobpostHandler.CreateJobpost)
-    employer.PUT("/jobposts/:id", jobpostHandler.UpdateJobpost)
-    employer.POST("/jobposts/:id/close", jobpostHandler.CloseJobpost)
-    employer.DELETE("/jobposts/:id", jobpostHandler.DeleteJobpost)
+    employer.POST("/jobposts", approvedEmployer, jobpostHandler.CreateJobpost)
+    employer.PUT("/jobposts/:id", approvedEmployer, jobpostHandler.UpdateJobpost)
+    employer.POST("/jobposts/:id/close", approvedEmployer, jobpostHandler.CloseJobpost)
+    employer.DELETE("/jobposts/:id", approvedEmployer, jobpostHandler.DeleteJobpost)
 
     // Job posts — public browsing (no login required; only applying needs an account)
     jobposts := api.Group("/jobposts")
@@ -78,16 +83,16 @@ func SetupRouter(
     // Employer reviewing applications to their own job posts
     employer.GET("/applications", applicationHandler.ListEmployerApplications)
     employer.GET("/applications/:id", applicationHandler.GetEmployerApplicationDetail)
-    employer.POST("/applications/:id/review", applicationHandler.ReviewApplication)
-    employer.DELETE("/applications/:id", applicationHandler.DeleteApplication)
+    employer.POST("/applications/:id/review", approvedEmployer, applicationHandler.ReviewApplication)
+    employer.DELETE("/applications/:id", approvedEmployer, applicationHandler.DeleteApplication)
 
     // Employer: interview scheduling (B6733827 subsystem 1)
-    employer.POST("/interviews", interviewHandler.CreateInterview)
-    employer.PUT("/interviews/:id", interviewHandler.UpdateInterview)
-    employer.POST("/interviews/:id/result", interviewHandler.SendResult)
+    employer.POST("/interviews", approvedEmployer, interviewHandler.CreateInterview)
+    employer.PUT("/interviews/:id", approvedEmployer, interviewHandler.UpdateInterview)
+    employer.POST("/interviews/:id/result", approvedEmployer, interviewHandler.SendResult)
 
     // Employer: employment agreements (B6733827 subsystem 2)
-    employer.POST("/agreements", employmentHandler.CreateAgreement)
+    employer.POST("/agreements", approvedEmployer, employmentHandler.CreateAgreement)
 
     // Student: confirm interview attendance / respond to reschedule requests
     student.POST("/interviews/:id/confirm", interviewHandler.ConfirmAttendance)
@@ -116,12 +121,12 @@ func SetupRouter(
     // Employer: time-edit approval queue
     employer.GET("/time-records", timeRecordHandler.ListEmployerTimeRecords)
     employer.GET("/time-edit-requests", timeRecordHandler.ListEmployerEditRequests)
-    employer.POST("/time-edit-requests/:id/approve", timeRecordHandler.ApproveEditRequest)
-    employer.POST("/time-edit-requests/:id/reject", timeRecordHandler.RejectEditRequest)
+    employer.POST("/time-edit-requests/:id/approve", approvedEmployer, timeRecordHandler.ApproveEditRequest)
+    employer.POST("/time-edit-requests/:id/reject", approvedEmployer, timeRecordHandler.RejectEditRequest)
 
     // Employer: payroll calculation + payment (B6729875 subsystem 2)
-    employer.POST("/payrolls", payrollHandler.CreatePayroll)
-    employer.POST("/payrolls/:id/approve", payrollHandler.ApprovePayroll)
+    employer.POST("/payrolls", approvedEmployer, payrollHandler.CreatePayroll)
+    employer.POST("/payrolls/:id/approve", approvedEmployer, payrollHandler.ApprovePayroll)
     employer.GET("/payrolls/summary", payrollHandler.MonthlySummary)
 
     // Student: confirm payment receipt

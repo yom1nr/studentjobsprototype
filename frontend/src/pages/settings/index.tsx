@@ -543,9 +543,24 @@ function EmployerSettingsView() {
   const rows = activeTab === 'company' ? companyFieldRows : activeTab === 'contact' ? contactFieldRows : []
   const statusInfo = approveStatus ? APPROVE_STATUS_LABEL[approveStatus] : undefined
 
+  const approvalBanner: { severity: 'warning' | 'error' | 'info'; text: string } | null =
+    approveStatus === 'approved' || approveStatus === ''
+      ? null
+      : approveStatus === 'rejected'
+        ? { severity: 'error', text: 'บัญชีผู้ประกอบการของคุณไม่ได้รับการอนุมัติ จึงยังประกาศงาน สัมภาษณ์ หรือทำสัญญาจ้างไม่ได้ กรุณาติดต่อเจ้าหน้าที่' }
+        : approveStatus === 'request_document'
+          ? { severity: 'info', text: 'เจ้าหน้าที่ขอเอกสารเพิ่มเติม กรุณาแนบเอกสารในแท็บ "เอกสารบริษัท" แล้วบันทึก บัญชีจะกลับเข้าคิวตรวจสอบอีกครั้ง' }
+          : { severity: 'warning', text: 'บัญชีอยู่ระหว่างรอเจ้าหน้าที่อนุมัติ ระหว่างนี้ยังประกาศงานหรือใช้งานส่วนอื่นไม่ได้ — แก้ไขข้อมูล/เอกสารได้ตามปกติ' }
+
   return (
     <Box sx={{ maxWidth: 950, mx: 'auto' }}>
       <ErrorAlert message={error} />
+
+      {approvalBanner && (
+        <Alert severity={approvalBanner.severity} sx={{ mb: 2, borderRadius: 2 }}>
+          {approvalBanner.text}
+        </Alert>
+      )}
 
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>

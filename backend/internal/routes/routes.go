@@ -73,6 +73,7 @@ func SetupRouter(
     student.POST("/schedule/extract", studentHandler.ExtractScheduleFromImage)
     student.GET("/applications", applicationHandler.ListMyApplications)
     student.POST("/applications", applicationHandler.CreateApplication)
+    student.PUT("/applications/:id", applicationHandler.UpdateMyApplication)
 
     // Employer reviewing applications to their own job posts
     employer.GET("/applications", applicationHandler.ListEmployerApplications)

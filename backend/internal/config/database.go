@@ -45,6 +45,7 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
         &models.Jobpost{},
         &models.Application{},
         &models.ApplicationAudit{},
+        &models.ApplicationDocument{},
         // Admin audit trail
         &models.AdminAuditLog{},
         // Complaint

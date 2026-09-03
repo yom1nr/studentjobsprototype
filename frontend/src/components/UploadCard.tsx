@@ -14,7 +14,7 @@ export function UploadCard({
   camera,
   onUpload,
   value,
-}: Readonly<{ label: string; camera?: boolean; onUpload?: (url: string) => void; value?: string }>) {
+}: Readonly<{ label: string; camera?: boolean; onUpload?: (url: string, name: string) => void; value?: string }>) {
   const { token } = useAuth()
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,7 +27,7 @@ export function UploadCard({
     setError(null)
     try {
       const url = await uploadFile(token, file)
-      onUpload?.(url)
+      onUpload?.(url, file.name)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'อัปโหลดล้มเหลว')
     } finally {

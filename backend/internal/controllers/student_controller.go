@@ -182,6 +182,11 @@ func (h *StudentController) ExtractScheduleFromImage(c *gin.Context) {
 			"ระบบสแกนตารางเรียนยังไม่พร้อมใช้งาน กรุณากรอกเวลาว่างเอง", "")
 		return
 	}
+	if errors.Is(err, utils.ErrAIBusy) {
+		utils.JSONError(c, http.StatusServiceUnavailable,
+			"ระบบ AI ไม่ว่างชั่วคราว กรุณาลองใหม่อีกครั้ง หรือกรอกเวลาว่างเอง", "")
+		return
+	}
 	if err != nil {
 		utils.JSONInternalError(c, "could not read the schedule image", err)
 		return

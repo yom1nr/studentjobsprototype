@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -21,8 +22,22 @@ import (
 // dependency.
 var ErrAINotConfigured = errors.New("AI schedule extraction is not configured")
 
-// geminiModel is the single vision model we call. No silent fallbacks.
-const geminiModel = "gemini-2.5-flash"
+// ErrAIBusy is returned when Gemini is rate-limiting or temporarily overloaded
+// (HTTP 429 / 503). Callers should tell the user to retry or enter free time
+// manually — it is not a bug on our side.
+var ErrAIBusy = errors.New("AI schedule extraction is temporarily unavailable")
+
+// defaultGeminiModel is the vision model we call. Google retires model names
+// fairly often, so GEMINI_MODEL can override it without a rebuild. No silent
+// multi-model fallbacks — one model per request.
+const defaultGeminiModel = "gemini-3.6-flash"
+
+func geminiModelName() string {
+	if m := strings.TrimSpace(os.Getenv("GEMINI_MODEL")); m != "" {
+		return m
+	}
+	return defaultGeminiModel
+}
 
 // TimeSlot is one day + time range.
 type TimeSlot struct {
@@ -100,7 +115,7 @@ func ExtractScheduleFromImage(ctx context.Context, img []byte, mimeType string) 
 		return nil, err
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", geminiModel)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", geminiModelName())
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -110,16 +125,29 @@ func ExtractScheduleFromImage(ctx context.Context, img []byte, mimeType string) 
 
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
+		// A client timeout / deadline is Gemini being slow, not our bug —
+		// surface it as "busy, try again" like an explicit 503.
+		var ne net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+			return nil, ErrAIBusy
+		}
 		return nil, fmt.Errorf("gemini request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		return nil, ErrAIBusy
+	}
 
 	var parsed geminiResp
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("gemini response not JSON: %w", err)
 	}
 	if parsed.Error != nil {
+		if parsed.Error.Code == http.StatusTooManyRequests || parsed.Error.Code == http.StatusServiceUnavailable {
+			return nil, ErrAIBusy
+		}
 		return nil, fmt.Errorf("gemini error %d %s: %s", parsed.Error.Code, parsed.Error.Status, parsed.Error.Message)
 	}
 	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {

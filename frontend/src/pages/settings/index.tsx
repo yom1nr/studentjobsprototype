@@ -19,7 +19,7 @@ import { ApiError, getApiBaseUrl } from '../../services/https'
 import { uploadFile } from '../../services/https/upload'
 import { getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/https/employer'
 import type { EmployerProfile as EmployerProfileApi } from '../../interface/IEmployerInterface'
-import { getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
+import { extractScheduleFromImage, getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
 import type { StudentProfile as StudentProfileApi } from '../../interface/IStudentInterface'
 
 const colors = { navy: '#012150', border: '#D9D9D9', field: '#F0F0F0' }
@@ -793,10 +793,35 @@ function StudentSettingsView() {
     }
   }, [token, user?.user_name, user?.phone, user?.gender])
 
+  const [scanBusy, setScanBusy] = useState(false)
+  const [scanNote, setScanNote] = useState<string | null>(null)
+
   function startEdit() {
     setDraft(profile)
     setError(null)
+    setScanNote(null)
     setEditing(true)
+  }
+
+  async function handleScanSchedule(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !token) return
+    setScanBusy(true)
+    setScanNote(null)
+    try {
+      const result = await extractScheduleFromImage(token, file)
+      if (result.summary) {
+        setDraft((d) => ({ ...d, availableTime: result.summary }))
+        setScanNote('กรอกเวลาว่างจากตารางเรียนให้แล้ว — ปรับแก้ได้ตามต้องการ')
+      } else {
+        setScanNote('อ่านตารางเรียนไม่ได้ กรุณากรอกเวลาว่างเอง')
+      }
+    } catch (err) {
+      setScanNote(err instanceof ApiError ? err.message : 'สแกนไม่สำเร็จ กรุณากรอกเวลาว่างเอง')
+    } finally {
+      setScanBusy(false)
+    }
   }
 
   async function saveProfile() {
@@ -976,6 +1001,22 @@ function StudentSettingsView() {
                 </Typography>
               </Box>
             ))}
+          </Box>
+        )}
+
+        {editing && (
+          <Box sx={{ mt: 2 }}>
+            <Button
+              component="label"
+              size="small"
+              disabled={scanBusy}
+              startIcon={scanBusy ? <CircularProgress size={16} /> : <UploadOutlinedIcon />}
+              sx={{ textTransform: 'none', color: '#0066CC' }}
+            >
+              {scanBusy ? 'กำลังสแกน…' : 'สแกนตารางเรียนเพื่อกรอกเวลาว่าง (AI)'}
+              <input type="file" hidden accept=".jpg,.jpeg,.png,.webp" onChange={(e) => void handleScanSchedule(e)} />
+            </Button>
+            {scanNote && <Typography sx={{ fontSize: 12, color: '#697077', mt: 0.5 }}>{scanNote}</Typography>}
           </Box>
         )}
       </Box>

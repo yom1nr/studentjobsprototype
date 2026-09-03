@@ -1,6 +1,6 @@
 import { Box, Button, Typography } from '@mui/material'
 import { Outlet, Link as RouterLink, useNavigate } from 'react-router-dom'
-import studentLogo from '../../assets/studentlogo.png'
+import studentLogo from '../../assets/student-logo.svg'
 
 const colors = { text: '#000349', border: '#E8E8E8', accent: '#0090FF', logoAccent: '#045BE4', logoText: '#324054' }
 

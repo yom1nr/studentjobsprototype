@@ -44,15 +44,69 @@ const colors = { navy: '#012150', border: '#9E9E9E', tagBg: 'rgba(0, 136, 255, 0
 const jobTypeOptions = ['ทั้งหมด', 'พาร์ทไทม์', 'รายชั่วโมง', 'รายวัน', 'รายเดือน']
 const locationOptions = ['ทั้งหมด', 'ประตู1, มทส', 'ประตู4, มทส', 'ประตู5, มทส']
 const timeSlots = ['เช้า', 'บ่าย', 'เย็น', 'ดึก', 'เสาร์-อาทิตย์']
+const distanceOptions = ['ไม่จำกัด', '1', '3', '5']
+
+// FR5 — filter by distance. Job posts store their location as free text, so we
+// resolve it against a handful of known SUT landmarks and fall back to the
+// campus centre. Distance is then computed from the student's browser location.
+const SUT_LANDMARKS: Record<string, { lat: number; lng: number }> = {
+  'ประตู 1': { lat: 14.885, lng: 102.015 },
+  'ประตู 4': { lat: 14.872, lng: 102.025 },
+  'ประตู 5': { lat: 14.889, lng: 102.028 },
+  'อาคารเรียนรวม': { lat: 14.8817, lng: 102.0207 },
+  'สุรสัมมนาคาร': { lat: 14.883, lng: 102.023 },
+  'ศูนย์เครื่องมือ': { lat: 14.889, lng: 102.028 },
+  'บรรณสาร': { lat: 14.872, lng: 102.025 },
+  'อาคารบริหาร': { lat: 14.881, lng: 102.021 },
+  F9: { lat: 14.8805, lng: 102.0195 },
+}
+const SUT_CENTER = { lat: 14.8817, lng: 102.0207 }
+
+function jobCoords(loc: string): { lat: number; lng: number } {
+  if (loc) {
+    for (const [key, coord] of Object.entries(SUT_LANDMARKS)) {
+      if (loc.includes(key) || loc.replace(/\s/g, '').includes(key.replace(/\s/g, ''))) return coord
+    }
+  }
+  return SUT_CENTER
+}
+
+function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
+}
+
+function matchesTimeSlots(job: { period: string; job_description: string; job_type: string }, slots: string[]): boolean {
+  if (slots.length === 0) return true
+  const hay = `${job.period} ${job.job_description} ${job.job_type}`.toLowerCase()
+  return slots.some((slot) => {
+    if (slot === 'เสาร์-อาทิตย์') return /เสาร์|อาทิตย์|สุดสัปดาห์|weekend/.test(hay)
+    return hay.includes(slot)
+  })
+}
 
 type JobFilters = {
   jobType: string
   location: string
   minWage: string
   maxWage: string
+  timeSlots: string[]
+  maxDistanceKm: string
 }
 
-const DEFAULT_JOB_FILTERS: JobFilters = { jobType: 'ทั้งหมด', location: 'ทั้งหมด', minWage: '0', maxWage: '50000' }
+const DEFAULT_JOB_FILTERS: JobFilters = {
+  jobType: 'ทั้งหมด',
+  location: 'ทั้งหมด',
+  minWage: '0',
+  maxWage: '50000',
+  timeSlots: [],
+  maxDistanceKm: 'ไม่จำกัด',
+}
 
 function FilterDialog({
   open,
@@ -64,15 +118,16 @@ function FilterDialog({
   // `key` keyed to open/close) each time the dialog reopens, so this always starts
   // from the last-applied filters without needing an effect to resync it.
   const [draft, setDraft] = useState<JobFilters>(value)
-  const [slots, setSlots] = useState<string[]>([])
 
   function toggleSlot(slot: string) {
-    setSlots((s) => (s.includes(slot) ? s.filter((x) => x !== slot) : [...s, slot]))
+    setDraft((d) => ({
+      ...d,
+      timeSlots: d.timeSlots.includes(slot) ? d.timeSlots.filter((x) => x !== slot) : [...d.timeSlots, slot],
+    }))
   }
 
   function clear() {
     setDraft(DEFAULT_JOB_FILTERS)
-    setSlots([])
   }
 
   return (
@@ -102,15 +157,31 @@ function FilterDialog({
         </Box>
 
         <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.5 }}>เวลาทำงาน</Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 1, mb: 3 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 1, mb: 2 }}>
           {timeSlots.map((slot) => (
             <FormControlLabel
               key={slot}
-              control={<Checkbox size="small" checked={slots.includes(slot)} onChange={() => toggleSlot(slot)} />}
+              control={<Checkbox size="small" checked={draft.timeSlots.includes(slot)} onChange={() => toggleSlot(slot)} />}
               label={<Typography sx={{ fontSize: 13 }}>{slot}</Typography>}
             />
           ))}
         </Box>
+
+        <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy, mb: 0.5 }}>รัศมีจากตำแหน่งของฉัน (กม.)</Typography>
+        <TextField
+          select
+          fullWidth
+          size="small"
+          value={draft.maxDistanceKm}
+          onChange={(e) => setDraft({ ...draft, maxDistanceKm: e.target.value })}
+          sx={{ mb: 3 }}
+        >
+          {distanceOptions.map((o) => (
+            <MenuItem key={o} value={o}>
+              {o === 'ไม่จำกัด' ? 'ไม่จำกัด' : `ไม่เกิน ${o} กม.`}
+            </MenuItem>
+          ))}
+        </TextField>
 
         <Box sx={{ display: 'flex', gap: 1.5 }}>
           <Button onClick={clear} fullWidth sx={{ borderRadius: '40px', textTransform: 'none', bgcolor: '#F0F0F0', color: colors.navy, '&:hover': { bgcolor: '#E4E4E4' } }}>
@@ -253,6 +324,17 @@ function StudentJobSearchView() {
   const [selectedJob, setSelectedJob] = useState<Jobpost | null>(null)
   const [outcome, setOutcome] = useState<'success' | 'fail' | null>(null)
   const [outcomeMessage, setOutcomeMessage] = useState<string | null>(null)
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [geoDenied, setGeoDenied] = useState(false)
+
+  useEffect(() => {
+    if (!('geolocation' in navigator)) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => setGeoDenied(true),
+      { timeout: 8000 },
+    )
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -282,14 +364,23 @@ function StudentJobSearchView() {
     const minWage = Number(filters.minWage) || 0
     const maxWage = Number(filters.maxWage) || Number.POSITIVE_INFINITY
 
+    const maxDist = filters.maxDistanceKm === 'ไม่จำกัด' ? Infinity : Number(filters.maxDistanceKm)
+
     return jobs.filter((job) => {
       if (q && !job.position.toLowerCase().includes(q) && !job.company_name.toLowerCase().includes(q)) return false
       if (filters.jobType !== 'ทั้งหมด' && job.job_type !== filters.jobType) return false
       if (filters.location !== 'ทั้งหมด' && job.location !== filters.location) return false
       if (job.wage < minWage || job.wage > maxWage) return false
+      if (!matchesTimeSlots(job, filters.timeSlots)) return false
+      if (maxDist !== Infinity && userCoords && distanceKm(userCoords, jobCoords(job.location)) > maxDist) return false
       return true
     })
-  }, [jobs, query, filters])
+  }, [jobs, query, filters, userCoords])
+
+  function jobDistanceLabel(job: Jobpost): string | null {
+    if (!userCoords) return null
+    return `~${distanceKm(userCoords, jobCoords(job.location)).toFixed(1)} กม.`
+  }
 
   async function apply() {
     if (!selectedJob) return
@@ -339,11 +430,16 @@ function StudentJobSearchView() {
         </Button>
       </Box>
 
-      <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>
+      <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 24, color: colors.navy, mb: 1 }}>
         {query.trim().length === 0
           ? 'แนะนำสำหรับคุณ'
           : <>ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box></>}
       </Typography>
+      {geoDenied && filters.maxDistanceKm !== 'ไม่จำกัด' && (
+        <Typography sx={{ fontSize: 12, color: '#B5850C', mb: 1 }}>
+          ไม่สามารถเข้าถึงตำแหน่งของคุณได้ — ตัวกรองระยะทางถูกปิดใช้งาน
+        </Typography>
+      )}
 
       {loading ? (
         <Alert severity="info">กำลังโหลดข้อมูล…</Alert>
@@ -371,6 +467,9 @@ function StudentJobSearchView() {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
                     <RoomOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
                     <Typography sx={{ fontSize: 16, color: colors.navy }}>{job.location}</Typography>
+                    {jobDistanceLabel(job) && (
+                      <Chip label={jobDistanceLabel(job)} size="small" sx={{ bgcolor: '#E5F2FF', color: '#0066CC', height: 20, fontSize: 12 }} />
+                    )}
                   </Box>
                 )}
                 <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.wage} บาท/ชั่วโมง</Typography>

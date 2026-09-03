@@ -28,6 +28,8 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined'
+import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined'
+import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined'
 
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate, Link as RouterLink } from 'react-router-dom'
@@ -111,6 +113,18 @@ const adminApplicationsNavItem: NavItem = {
   path: '/admin/applications',
 }
 
+const adminEmployerDirectoryNavItem: NavItem = {
+  label: 'รายชื่อผู้ประกอบการ',
+  icon: <BusinessOutlinedIcon />,
+  path: '/admin/employer-directory',
+}
+
+const adminStudentDirectoryNavItem: NavItem = {
+  label: 'รายชื่อนักศึกษา',
+  icon: <PeopleAltOutlinedIcon />,
+  path: '/admin/student-directory',
+}
+
 function buildBottomNavItems(unreadNotifications: number): NavItem[] {
   return [
     { label: 'ข้อความ',      icon: <ChatBubbleOutlineOutlinedIcon />,         path: '/messages',      badge: 2 },
@@ -183,7 +197,9 @@ function AppShellInner() {
     mainNavItems[2], // เวลาทำงาน
     payrollNavItem,
     mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
-    ...(user?.role === 'admin' ? [adminApplicationsNavItem, adminNavItem] : []),
+    ...(user?.role === 'admin'
+      ? [adminApplicationsNavItem, adminNavItem, adminEmployerDirectoryNavItem, adminStudentDirectoryNavItem]
+      : []),
   ]
 
   return (

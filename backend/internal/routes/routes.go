@@ -147,6 +147,12 @@ func SetupRouter(
     admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)
     admin.POST("/employers/:id/reject", adminHandler.RejectEmployer)
     admin.POST("/employers/:id/request-document", adminHandler.RequestDocuments)
+    // Employer / student directory (browse + edit any account) and the audit trail
+    admin.GET("/employer-directory", adminHandler.ListAllEmployers)
+    admin.PUT("/employer-directory/:id", adminHandler.UpdateEmployer)
+    admin.GET("/student-directory", adminHandler.ListAllStudents)
+    admin.PUT("/student-directory/:id", adminHandler.UpdateStudent)
+    admin.GET("/audit-logs", adminHandler.ListAuditLogs)
     admin.GET("/complaints", complaintHandler.ListAll)
     admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
 

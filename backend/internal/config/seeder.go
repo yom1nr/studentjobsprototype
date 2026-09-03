@@ -29,6 +29,12 @@ func SeedDatabase(db *gorm.DB) error {
 		return err
 	}
 
+	// Extended demo dataset (10 employers / 10 students / job posts). Skipped
+	// when SEED_DEMO_DATA=false.
+	if err := seedDemoData(db); err != nil {
+		return err
+	}
+
 	log.Println("Database seed completed successfully")
 	return nil
 }

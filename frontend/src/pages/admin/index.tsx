@@ -20,7 +20,8 @@ import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
 import { ApiError } from '../../services/https'
-import { approveEmployer, listEmployerApprovals, rejectEmployer } from '../../services/https/admin'
+import { approveEmployer, listEmployerApprovals, rejectEmployer, requestEmployerDocuments } from '../../services/https/admin'
+import { getApiBaseUrl } from '../../services/https'
 import type { EmployerApproval, EmployerApprovalStatus } from '../../interface/IAdminInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6' }
@@ -31,10 +32,39 @@ const STATUS_TABS: { key: EmployerApprovalStatus; label: string }[] = [
   { key: 'rejected', label: 'ไม่อนุมัติ' },
 ]
 
-const STATUS_CHIP: Record<string, { label: string; color: 'warning' | 'success' | 'error' }> = {
+const STATUS_CHIP: Record<string, { label: string; color: 'warning' | 'success' | 'error' | 'info' }> = {
   pending: { label: 'รอการตรวจสอบ', color: 'warning' },
+  request_document: { label: 'ขอเอกสารเพิ่มเติม', color: 'info' },
   approved: { label: 'อนุมัติแล้ว', color: 'success' },
   rejected: { label: 'ไม่อนุมัติ', color: 'error' },
+}
+
+// pending and request_document are both still "in review" — the approve/reject/
+// request actions apply to either.
+function inReview(status: string): boolean {
+  return status === 'pending' || status === 'request_document'
+}
+
+function DocLink({ label, url }: Readonly<{ label: string; url: string }>) {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5 }}>
+      <Typography sx={{ fontSize: 14 }}>{label}</Typography>
+      {url ? (
+        <Button
+          component="a"
+          href={`${getApiBaseUrl()}${url}`}
+          target="_blank"
+          rel="noopener"
+          size="small"
+          sx={{ textTransform: 'none', color: '#0088FF' }}
+        >
+          เปิดดูเอกสาร
+        </Button>
+      ) : (
+        <Typography sx={{ fontSize: 13, color: '#B9C6DC' }}>ไม่ได้แนบ</Typography>
+      )}
+    </Box>
+  )
 }
 
 export default function AdminEmployerApprovalsPage() {
@@ -114,6 +144,21 @@ export default function AdminEmployerApprovalsPage() {
       setReloadToken((t) => t + 1)
     } catch (err) {
       setActionError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'ปฏิเสธไม่สำเร็จ')
+    } finally {
+      setDeciding(false)
+    }
+  }
+
+  async function handleRequestDocuments() {
+    if (!token || !selected) return
+    setDeciding(true)
+    setActionError(null)
+    try {
+      await requestEmployerDocuments(token, selected.employer_id, rejectReason.trim() || undefined)
+      setSelected(null)
+      setReloadToken((t) => t + 1)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'ส่งคำขอไม่สำเร็จ')
     } finally {
       setDeciding(false)
     }
@@ -205,9 +250,11 @@ export default function AdminEmployerApprovalsPage() {
 
             <Box sx={{ display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 1, columnGap: 2, mb: 2 }}>
               <Typography sx={{ fontWeight: 600, color: colors.navy }}>ผู้ติดต่อ</Typography>
-              <Typography>{`${selected.first_name} ${selected.last_name}`}</Typography>
+              <Typography>{`${selected.first_name} ${selected.last_name}`}{selected.position ? ` (${selected.position})` : ''}</Typography>
               <Typography sx={{ fontWeight: 600, color: colors.navy }}>อีเมล</Typography>
               <Typography>{selected.email}</Typography>
+              <Typography sx={{ fontWeight: 600, color: colors.navy }}>เบอร์โทร</Typography>
+              <Typography>{selected.phone || '-'}</Typography>
               <Typography sx={{ fontWeight: 600, color: colors.navy }}>ประเภทธุรกิจ</Typography>
               <Typography>{selected.business_type || '-'}</Typography>
               <Typography sx={{ fontWeight: 600, color: colors.navy }}>เลขผู้เสียภาษี</Typography>
@@ -218,7 +265,14 @@ export default function AdminEmployerApprovalsPage() {
               <Chip size="small" sx={{ justifySelf: 'start' }} label={STATUS_CHIP[selected.status]?.label ?? selected.status} color={STATUS_CHIP[selected.status]?.color ?? 'default'} />
             </Box>
 
-            {selected.status === 'pending' && (
+            <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5, mb: 2 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 14, color: colors.navy, mb: 0.5 }}>เอกสารที่แนบมา</Typography>
+              <DocLink label="หนังสือรับรองบริษัท" url={selected.company_regis} />
+              <DocLink label="บัตรประชาชนผู้ติดต่อ" url={selected.card_id} />
+              <DocLink label="โลโก้บริษัท" url={selected.logo} />
+            </Box>
+
+            {inReview(selected.status) && (
               <>
                 {rejecting && (
                   <TextField
@@ -253,6 +307,13 @@ export default function AdminEmployerApprovalsPage() {
                         sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2.5 }}
                       >
                         ไม่อนุมัติ
+                      </Button>
+                      <Button
+                        onClick={() => void handleRequestDocuments()}
+                        disabled={deciding}
+                        sx={{ bgcolor: '#E5F2FF', color: '#0066CC', textTransform: 'none', borderRadius: '20px', px: 2.5 }}
+                      >
+                        ขอเอกสารเพิ่มเติม
                       </Button>
                       <Button
                         variant="contained"

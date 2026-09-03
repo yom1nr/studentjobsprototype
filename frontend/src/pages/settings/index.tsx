@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, Chip, Dialog, IconButton, MenuItem, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, CircularProgress, Dialog, IconButton, MenuItem, TextField, Typography } from '@mui/material'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import CheckOutlinedIcon from '@mui/icons-material/CheckOutlined'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
@@ -15,7 +15,8 @@ import { Link as RouterLink } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
-import { ApiError } from '../../services/https'
+import { ApiError, getApiBaseUrl } from '../../services/https'
+import { uploadFile } from '../../services/https/upload'
 import { getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/https/employer'
 import type { EmployerProfile as EmployerProfileApi } from '../../interface/IEmployerInterface'
 import { getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
@@ -140,65 +141,72 @@ const EMPLOYER_TABS = [
 
 type EmployerTabKey = (typeof EMPLOYER_TABS)[number]['key']
 
-type CompanyDocument = { key: string; label: string; hint: string; fileName: string | null }
+type CompanyDocument = { key: 'registration' | 'signatoryId' | 'logo'; label: string; hint: string; url: string }
 
 const INITIAL_COMPANY_DOCUMENTS: CompanyDocument[] = [
-  { key: 'registration', label: 'หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
-  { key: 'signatoryId', label: 'บัตรประชาชนของผู้มีอำนาจลงนาม', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
-  { key: 'logo', label: 'โลโก้บริษัท / ร้านค้า (ถ้ามี)', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', fileName: null },
+  { key: 'registration', label: 'หนังสือรับรองการจดทะเบียนบริษัท / ร้านค้า', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', url: '' },
+  { key: 'signatoryId', label: 'บัตรประชาชนของผู้มีอำนาจลงนาม', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', url: '' },
+  { key: 'logo', label: 'โลโก้บริษัท / ร้านค้า (ถ้ามี)', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', url: '' },
 ]
 
 function UploadRow({
   document,
+  token,
   onUpload,
-}: Readonly<{ document: CompanyDocument; onUpload: (key: string, fileName: string) => void }>) {
+}: Readonly<{ document: CompanyDocument; token: string; onUpload: (key: CompanyDocument['key'], url: string) => void }>) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function pick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const url = await uploadFile(token, file)
+      onUpload(document.key, url)
+    } catch (x) {
+      setErr(x instanceof ApiError ? x.message : 'อัปโหลดล้มเหลว')
+    } finally {
+      setBusy(false)
+      e.target.value = ''
+    }
+  }
+
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 2,
-        border: `1.5px solid ${colors.border}`,
-        borderRadius: 3,
-        p: 2,
-      }}
-    >
-      <Box
-        sx={{
-          width: 40,
-          height: 40,
-          borderRadius: '50%',
-          border: `1.5px solid ${colors.navy}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-        }}
-      >
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, border: `1.5px solid ${colors.border}`, borderRadius: 3, p: 2 }}>
+      <Box sx={{ width: 40, height: 40, borderRadius: '50%', border: `1.5px solid ${colors.navy}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <InsertDriveFileOutlinedIcon sx={{ color: colors.navy, fontSize: 20 }} />
       </Box>
       <Box sx={{ flex: 1 }}>
         <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy }}>{document.label}</Typography>
-        <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{document.fileName ?? document.hint}</Typography>
+        {err ? (
+          <Typography sx={{ fontSize: 12, color: '#DA1E28' }}>{err}</Typography>
+        ) : document.url ? (
+          <Typography
+            component="a"
+            href={`${getApiBaseUrl()}${document.url}`}
+            target="_blank"
+            rel="noopener"
+            sx={{ fontSize: 12, color: '#0088FF' }}
+          >
+            อัปโหลดแล้ว — เปิดดู
+          </Typography>
+        ) : (
+          <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{document.hint}</Typography>
+        )}
       </Box>
-      <IconButton component="label" sx={{ color: colors.navy }}>
-        <input
-          type="file"
-          hidden
-          accept=".pdf,.jpg,.jpeg,.png"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) onUpload(document.key, file.name)
-          }}
-        />
-        <UploadOutlinedIcon />
+      <IconButton component="label" disabled={busy} sx={{ color: colors.navy }}>
+        <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => void pick(e)} />
+        {busy ? <CircularProgress size={20} /> : <UploadOutlinedIcon />}
       </IconButton>
     </Box>
   )
 }
 
-const APPROVE_STATUS_LABEL: Record<string, { label: string; color: 'warning' | 'success' | 'error' }> = {
+const APPROVE_STATUS_LABEL: Record<string, { label: string; color: 'warning' | 'success' | 'error' | 'info' }> = {
   pending: { label: 'รอการอนุมัติ', color: 'warning' },
+  request_document: { label: 'ขอเอกสารเพิ่มเติม', color: 'info' },
   approved: { label: 'อนุมัติแล้ว', color: 'success' },
   rejected: { label: 'ไม่อนุมัติ', color: 'error' },
 }
@@ -259,6 +267,15 @@ function EmployerSettingsView() {
         if (cancelled) return
         setProfile(apiToLocalProfile(api, { email: user?.email ?? '', phone: user?.phone ?? '' }))
         setApproveStatus(api.approve_status)
+        setDocuments((docs) =>
+          docs.map((d) =>
+            d.key === 'registration'
+              ? { ...d, url: api.company_regis ?? '' }
+              : d.key === 'signatoryId'
+                ? { ...d, url: api.card_id ?? '' }
+                : { ...d, url: api.logo ?? '' },
+          ),
+        )
       } catch (err) {
         // 404 just means the employer hasn't submitted a company profile yet — keep the empty defaults.
         if (!cancelled && !(err instanceof ApiError && err.status === 404)) {
@@ -296,6 +313,9 @@ function EmployerSettingsView() {
         tax_id: draft.taxId.trim(),
         link: draft.website.trim() || undefined,
         company_address: draft.companyAddress.trim() || undefined,
+        company_regis: documents.find((d) => d.key === 'registration')?.url || undefined,
+        card_id: documents.find((d) => d.key === 'signatoryId')?.url || undefined,
+        logo: documents.find((d) => d.key === 'logo')?.url || undefined,
       })
       if (draft.phone.trim() !== (user?.phone ?? '')) {
         await updateProfile({ phone: draft.phone.trim() || undefined })
@@ -315,8 +335,40 @@ function EmployerSettingsView() {
     }
   }
 
-  function uploadDocument(key: string, fileName: string) {
-    setDocuments((docs) => docs.map((d) => (d.key === key ? { ...d, fileName } : d)))
+  function uploadDocument(key: CompanyDocument['key'], url: string) {
+    setDocuments((docs) => docs.map((d) => (d.key === key ? { ...d, url } : d)))
+  }
+
+  // Saves just the verification documents against the already-saved company
+  // profile (no company-tab "edit" needed). Re-submits into the review queue if
+  // the account was in "request_document".
+  const [savingDocs, setSavingDocs] = useState(false)
+  async function saveDocuments() {
+    if (!token) return
+    setError(null)
+    setSavingDocs(true)
+    try {
+      const api = await upsertMyEmployerProfile(token, {
+        first_name: profile.contactFirstName,
+        last_name: profile.contactLastName,
+        position: profile.position || undefined,
+        line_id: profile.lineId || undefined,
+        company_name: profile.companyName,
+        business_type: profile.businessType || undefined,
+        tax_id: profile.taxId,
+        link: profile.website || undefined,
+        company_address: profile.companyAddress || undefined,
+        company_regis: documents.find((d) => d.key === 'registration')?.url || undefined,
+        card_id: documents.find((d) => d.key === 'signatoryId')?.url || undefined,
+        logo: documents.find((d) => d.key === 'logo')?.url || undefined,
+      })
+      setApproveStatus(api.approve_status)
+      setSavedNotice(true)
+    } catch (err) {
+      setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกเอกสารไม่สำเร็จ')
+    } finally {
+      setSavingDocs(false)
+    }
   }
 
   async function changePassword() {
@@ -475,9 +527,24 @@ function EmployerSettingsView() {
 
           {activeTab === 'documents' && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {approveStatus === 'request_document' && (
+                <Alert severity="info">
+                  เจ้าหน้าที่ขอเอกสารยืนยันเพิ่มเติม กรุณาอัปโหลดเอกสารด้านล่างแล้วกด “บันทึก” เพื่อส่งกลับให้ตรวจสอบอีกครั้ง
+                </Alert>
+              )}
               {documents.map((doc) => (
-                <UploadRow key={doc.key} document={doc} onUpload={uploadDocument} />
+                <UploadRow key={doc.key} document={doc} token={token ?? ''} onUpload={uploadDocument} />
               ))}
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                <Button
+                  variant="contained"
+                  onClick={() => void saveDocuments()}
+                  disabled={savingDocs}
+                  sx={{ bgcolor: colors.navy, textTransform: 'none', borderRadius: '20px', px: 3, '&:hover': { bgcolor: '#000226' } }}
+                >
+                  {savingDocs ? 'กำลังบันทึก…' : 'บันทึกเอกสาร'}
+                </Button>
+              </Box>
             </Box>
           )}
 

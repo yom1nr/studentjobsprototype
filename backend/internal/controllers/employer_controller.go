@@ -75,7 +75,7 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
     var conflicting models.Employer
     conflictQuery := h.db.Where("tax_id = ?", payload.TaxID)
     if employer != nil {
-        conflictQuery = conflictQuery.Where("id != ?", employer.UserID)
+        conflictQuery = conflictQuery.Where("user_id != ?", employer.UserID)
     }
     if err := conflictQuery.First(&conflicting).Error; err == nil {
         utils.JSONError(c, http.StatusBadRequest, "update failed", "tax id already registered to another employer")
@@ -122,12 +122,35 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
         }
     }
 
+    // Upsert the verification documents.
+    attachment := models.AttachmentEmployer{UserID: userID}
+    if err := h.db.Where("user_id = ?", userID).First(&attachment).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+        utils.JSONInternalError(c, "update failed", err)
+        return
+    }
+    attachment.CompanyRegis = payload.CompanyRegis
+    attachment.Logo = payload.Logo
+    attachment.CardID = payload.CardID
+    if attachment.AttachmentEmployerID == 0 {
+        h.db.Create(&attachment)
+    } else {
+        h.db.Save(&attachment)
+    }
+    employer.AttachmentEmployer = &attachment
+
+    // FR2 loop: an employer who was asked for more documents and re-submits their
+    // profile goes back into the pending review queue.
+    if employer.Approve != nil && employer.Approve.Status == "request_document" {
+        employer.Approve.Status = "pending"
+        h.db.Save(employer.Approve)
+    }
+
     utils.JSONSuccess(c, http.StatusOK, mapEmployerToResponse(employer))
 }
 
 func (h *EmployerController) findByUserID(userID uint) (*models.Employer, error) {
     var employer models.Employer
-    err := h.db.Preload("Approve").Where("user_id = ?", userID).First(&employer).Error
+    err := h.db.Preload("Approve").Preload("AttachmentEmployer").Where("user_id = ?", userID).First(&employer).Error
     if err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             return nil, nil
@@ -142,6 +165,12 @@ func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileRespon
     if employer.Approve != nil {
         status = employer.Approve.Status
     }
+    companyRegis, logo, cardID := "", "", ""
+    if employer.AttachmentEmployer != nil {
+        companyRegis = employer.AttachmentEmployer.CompanyRegis
+        logo = employer.AttachmentEmployer.Logo
+        cardID = employer.AttachmentEmployer.CardID
+    }
 
     return &dto.EmployerProfileResponse{
         ID:             employer.UserID,
@@ -155,6 +184,9 @@ func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileRespon
         TaxID:          employer.TaxID,
         Link:           employer.Link,
         CompanyAddress: employer.CompanyAddress,
+        CompanyRegis:   companyRegis,
+        Logo:           logo,
+        CardID:         cardID,
         ApproveStatus:  status,
         CreatedAt:      employer.CreatedAt.Format(time.RFC3339),
         UpdatedAt:      employer.UpdatedAt.Format(time.RFC3339),

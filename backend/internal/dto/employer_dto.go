@@ -11,6 +11,11 @@ type EmployerProfileRequest struct {
     TaxID          string `json:"tax_id" validate:"required,max=50"`
     Link           string `json:"link" validate:"omitempty,max=255"`
     CompanyAddress string `json:"company_address" validate:"omitempty"`
+    // Verification document URLs (from POST /upload). Submitting these while an
+    // account is in "request_document" moves it back into the review queue.
+    CompanyRegis string `json:"company_regis" validate:"omitempty,max=500"`
+    Logo         string `json:"logo" validate:"omitempty,max=500"`
+    CardID       string `json:"card_id" validate:"omitempty,max=500"`
 }
 
 type EmployerProfileResponse struct {
@@ -25,6 +30,9 @@ type EmployerProfileResponse struct {
     TaxID          string `json:"tax_id"`
     Link           string `json:"link"`
     CompanyAddress string `json:"company_address"`
+    CompanyRegis   string `json:"company_regis"`
+    Logo           string `json:"logo"`
+    CardID         string `json:"card_id"`
     ApproveStatus  string `json:"approve_status"`
     CreatedAt      string `json:"created_at"`
     UpdatedAt      string `json:"updated_at"`

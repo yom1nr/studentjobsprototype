@@ -232,6 +232,176 @@ function apiToLocalProfile(api: EmployerProfileApi | null, account: { email: str
   }
 }
 
+// Shared "change password" button + dialog — used by both the employer and the
+// student settings views. Talks to PUT /users/profile via useAuth().updateProfile.
+function ChangePasswordCard({ onChanged }: Readonly<{ onChanged?: () => void }>) {
+  const { updateProfile } = useAuth()
+  const [open, setOpen] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function close() {
+    setOpen(false)
+    setError(null)
+  }
+
+  async function submit() {
+    setError(null)
+    if (currentPassword.length === 0) {
+      setError('กรุณากรอกรหัสผ่านปัจจุบัน')
+      return
+    }
+    if (newPassword.length < 8) {
+      setError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
+      return
+    }
+    if (!/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError('รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('รหัสผ่านไม่ตรงกัน')
+      return
+    }
+    setSaving(true)
+    try {
+      await updateProfile({ current_password: currentPassword, password: newPassword })
+      setOpen(false)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      onChanged?.()
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.detail ? `${err.message}: ${err.detail}` : err.message)
+      } else {
+        setError('เปลี่ยนรหัสผ่านไม่สำเร็จ')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <Button
+        onClick={() => setOpen(true)}
+        endIcon={<ChevronRightIcon />}
+        sx={{
+          justifyContent: 'space-between',
+          bgcolor: colors.field,
+          color: colors.navy,
+          textTransform: 'none',
+          fontWeight: 600,
+          borderRadius: 2,
+          px: 2,
+          py: 1.25,
+          '&:hover': { bgcolor: '#E4E4E4' },
+        }}
+      >
+        เปลี่ยนรหัสผ่าน
+      </Button>
+
+      <Dialog open={open} onClose={close} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>เปลี่ยนแปลงรหัสผ่านของคุณ</Typography>
+              <Typography sx={{ fontSize: 13, color: '#697077', mt: 0.5 }}>
+                รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร ประกอบด้วยอักษรและตัวเลข
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={close}>
+              <CloseOutlinedIcon />
+            </IconButton>
+          </Box>
+
+          <ErrorAlert message={error} />
+
+          <TextField
+            label="รหัสผ่านปัจจุบัน"
+            placeholder="กรุณากรอกรหัสผ่านปัจจุบัน"
+            type={showCurrent ? 'text' : 'password'}
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowCurrent((v) => !v)} edge="end">
+                    {showCurrent ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+          <TextField
+            label="รหัสผ่านใหม่"
+            placeholder="กรุณากรอกรหัสผ่านใหม่"
+            type={showNew ? 'text' : 'password'}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowNew((v) => !v)} edge="end">
+                    {showNew ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+          <TextField
+            label="ยืนยันรหัสผ่าน"
+            placeholder="กรุณากรอกรหัสผ่าน"
+            type={showConfirm ? 'text' : 'password'}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            fullWidth
+            sx={{ mb: 1 }}
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowConfirm((v) => !v)} edge="end">
+                    {showConfirm ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+                  </IconButton>
+                ),
+              },
+            }}
+          />
+
+          <Typography
+            component={RouterLink}
+            to="/forgot-password"
+            sx={{ fontSize: 13, color: '#045BE4', fontWeight: 600, textDecoration: 'none', display: 'inline-block', mb: 3 }}
+          >
+            ลืมรหัสผ่าน?
+          </Typography>
+
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={() => void submit()}
+            disabled={saving}
+            sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
+          >
+            {saving ? 'กำลังบันทึก…' : 'เปลี่ยนรหัสผ่าน'}
+          </Button>
+        </Box>
+      </Dialog>
+    </>
+  )
+}
+
 function EmployerSettingsView() {
   usePageTitle('ข้อมูลส่วนตัวผู้ประกอบการ')
   const { user, token, updateProfile } = useAuth()
@@ -250,16 +420,6 @@ function EmployerSettingsView() {
   const [activeTab, setActiveTab] = useState<EmployerTabKey>('company')
   const [documents, setDocuments] = useState(INITIAL_COMPANY_DOCUMENTS)
   const [avatarName, setAvatarName] = useState<string | null>(null)
-
-  const [passwordOpen, setPasswordOpen] = useState(false)
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
-  const [showNewPassword, setShowNewPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [passwordSaving, setPasswordSaving] = useState(false)
-  const [passwordError, setPasswordError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -373,43 +533,6 @@ function EmployerSettingsView() {
       setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกเอกสารไม่สำเร็จ')
     } finally {
       setSavingDocs(false)
-    }
-  }
-
-  async function changePassword() {
-    setPasswordError(null)
-    if (currentPassword.length === 0) {
-      setPasswordError('กรุณากรอกรหัสผ่านปัจจุบัน')
-      return
-    }
-    if (newPassword.length < 8) {
-      setPasswordError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
-      return
-    }
-    if (!/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      setPasswordError('รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข')
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordError('รหัสผ่านไม่ตรงกัน')
-      return
-    }
-    setPasswordSaving(true)
-    try {
-      await updateProfile({ current_password: currentPassword, password: newPassword })
-      setPasswordOpen(false)
-      setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
-      setSavedNotice(true)
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setPasswordError(err.detail ? `${err.message}: ${err.detail}` : err.message)
-      } else {
-        setPasswordError('เปลี่ยนรหัสผ่านไม่สำเร็จ')
-      }
-    } finally {
-      setPasswordSaving(false)
     }
   }
 
@@ -605,120 +728,12 @@ function EmployerSettingsView() {
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1, maxWidth: 380 }}>
                 <TextField label="ชื่อผู้ใช้" size="small" value={user.user_name} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
                 <TextField label="อีเมล" size="small" value={user.email} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-                <Button
-                  onClick={() => setPasswordOpen(true)}
-                  endIcon={<ChevronRightIcon />}
-                  sx={{
-                    justifyContent: 'space-between',
-                    bgcolor: colors.field,
-                    color: colors.navy,
-                    textTransform: 'none',
-                    fontWeight: 600,
-                    borderRadius: 2,
-                    px: 2,
-                    py: 1.25,
-                    '&:hover': { bgcolor: '#E4E4E4' },
-                  }}
-                >
-                  เปลี่ยนรหัสผ่าน
-                </Button>
+                <ChangePasswordCard onChanged={() => setSavedNotice(true)} />
               </Box>
             </Box>
           )}
         </Box>
       </Box>
-
-      {/* Change password dialog */}
-      <Dialog open={passwordOpen} onClose={() => setPasswordOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
-        <Box sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-            <Box>
-              <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>เปลี่ยนแปลงรหัสผ่านของคุณ</Typography>
-              <Typography sx={{ fontSize: 13, color: '#697077', mt: 0.5 }}>
-                รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร ประกอบด้วยอักษรและตัวเลข
-              </Typography>
-            </Box>
-            <IconButton size="small" onClick={() => setPasswordOpen(false)}>
-              <CloseOutlinedIcon />
-            </IconButton>
-          </Box>
-
-          <ErrorAlert message={passwordError} />
-
-          <TextField
-            label="รหัสผ่านปัจจุบัน"
-            placeholder="กรุณากรอกรหัสผ่านปัจจุบัน"
-            type={showCurrentPassword ? 'text' : 'password'}
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            fullWidth
-            sx={{ mb: 2 }}
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <IconButton size="small" onClick={() => setShowCurrentPassword((v) => !v)} edge="end">
-                    {showCurrentPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
-                  </IconButton>
-                ),
-              },
-            }}
-          />
-          <TextField
-            label="รหัสผ่านใหม่"
-            placeholder="กรุณากรอกรหัสผ่านใหม่"
-            type={showNewPassword ? 'text' : 'password'}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            fullWidth
-            sx={{ mb: 2 }}
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <IconButton size="small" onClick={() => setShowNewPassword((v) => !v)} edge="end">
-                    {showNewPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
-                  </IconButton>
-                ),
-              },
-            }}
-          />
-          <TextField
-            label="ยืนยันรหัสผ่าน"
-            placeholder="กรุณากรอกรหัสผ่าน"
-            type={showConfirmPassword ? 'text' : 'password'}
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            fullWidth
-            sx={{ mb: 1 }}
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <IconButton size="small" onClick={() => setShowConfirmPassword((v) => !v)} edge="end">
-                    {showConfirmPassword ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
-                  </IconButton>
-                ),
-              },
-            }}
-          />
-
-          <Typography
-            component={RouterLink}
-            to="/forgot-password"
-            sx={{ fontSize: 13, color: '#045BE4', fontWeight: 600, textDecoration: 'none', display: 'inline-block', mb: 3 }}
-          >
-            ลืมรหัสผ่าน?
-          </Typography>
-
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={() => void changePassword()}
-            disabled={passwordSaving}
-            sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
-          >
-            {passwordSaving ? 'กำลังบันทึก…' : 'เปลี่ยนรหัสผ่าน'}
-          </Button>
-        </Box>
-      </Dialog>
 
       {/* Save success dialog */}
       <Dialog open={savedNotice} onClose={() => setSavedNotice(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
@@ -1023,6 +1038,15 @@ function StudentSettingsView() {
             {scanNote && <Typography sx={{ fontSize: 12, color: '#697077', mt: 0.5 }}>{scanNote}</Typography>}
           </Box>
         )}
+      </Box>
+
+      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
+        <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>จัดการบัญชี</Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 380 }}>
+          <TextField label="ชื่อผู้ใช้" size="small" value={user.user_name} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+          <TextField label="อีเมล" size="small" value={user.email} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
+          <ChangePasswordCard onChanged={() => setSavedNotice(true)} />
+        </Box>
       </Box>
 
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>

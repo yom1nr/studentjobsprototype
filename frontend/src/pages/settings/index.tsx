@@ -30,7 +30,9 @@ type Profile = {
   firstName: string
   lastName: string
   gender: string
+  dateOfBirth: string
   age: string
+  availableTime: string
   address: string
   university: string
   faculty: string
@@ -44,7 +46,9 @@ const EMPTY_PROFILE: Profile = {
   firstName: '',
   lastName: '',
   gender: '',
+  dateOfBirth: '',
   age: '',
+  availableTime: '',
   address: '',
   university: '',
   faculty: '',
@@ -58,13 +62,14 @@ const fieldRows: { key: keyof Profile; label: string }[] = [
   { key: 'firstName', label: 'ชื่อ' },
   { key: 'lastName', label: 'นามสกุล' },
   { key: 'gender', label: 'เพศ' },
-  { key: 'age', label: 'อายุ' },
+  { key: 'dateOfBirth', label: 'วันเกิด' },
   { key: 'address', label: 'ที่อยู่' },
   { key: 'university', label: 'มหาวิทยาลัย' },
   { key: 'faculty', label: 'คณะ' },
   { key: 'major', label: 'สาขาวิชา' },
   { key: 'year', label: 'ชั้นปีที่ศึกษา' },
   { key: 'phone', label: 'เบอร์โทรศัพท์' },
+  { key: 'availableTime', label: 'เวลาว่าง (สำหรับค้นหางาน)' },
   { key: 'skills', label: 'ทักษะความสามารถ' },
 ]
 
@@ -729,21 +734,23 @@ function apiToLocalStudentProfile(api: StudentProfileApi | null, account: { user
   return {
     firstName: api?.first_name ?? account.userName,
     lastName: api?.last_name ?? '',
-    gender: account.gender,
-    age: '',
+    gender: api?.gender || account.gender,
+    dateOfBirth: api?.date_of_birth ?? '',
+    age: api?.age ? String(api.age) : '',
+    availableTime: api?.available_time ?? '',
     address: api?.address ?? '',
     university: api?.university ?? '',
     faculty: api?.faculty ?? '',
     major: api?.major ?? '',
     year: api?.years ?? '',
-    phone: account.phone,
+    phone: api?.phone || account.phone,
     skills: api?.skill ?? '',
   }
 }
 
 function StudentSettingsView() {
   usePageTitle('ข้อมูลส่วนตัวนักศึกษา')
-  const { user, token, updateProfile } = useAuth()
+  const { user, token, refreshProfile } = useAuth()
 
   const [profile, setProfile] = useState<Profile>(() =>
     apiToLocalStudentProfile(null, { userName: user?.user_name ?? '', phone: user?.phone ?? '', gender: user?.gender ?? '' }),
@@ -800,16 +807,20 @@ function StudentSettingsView() {
       const api = await upsertMyStudentProfile(token, {
         first_name: draft.firstName.trim(),
         last_name: draft.lastName.trim(),
+        date_of_birth: draft.dateOfBirth || undefined,
+        gender: draft.gender.trim() || undefined,
+        phone: draft.phone.trim() || undefined,
         address: draft.address.trim() || undefined,
         university: draft.university.trim() || undefined,
         faculty: draft.faculty.trim() || undefined,
         major: draft.major.trim() || undefined,
         years: draft.year.trim() || undefined,
         skill: draft.skills.trim() || undefined,
+        available_time: draft.availableTime.trim() || undefined,
       })
-      if (draft.phone.trim() !== (user?.phone ?? '') || draft.gender.trim() !== (user?.gender ?? '')) {
-        await updateProfile({ phone: draft.phone.trim() || undefined, gender: draft.gender.trim() || undefined })
-      }
+      // The upsert already mirrored phone/gender/avatar onto the User row; refresh
+      // the auth context so other screens see the change.
+      await refreshProfile()
       setProfile(apiToLocalStudentProfile(api, { userName: user?.user_name ?? '', phone: draft.phone.trim(), gender: draft.gender.trim() }))
       setEditing(false)
       setSavedNotice(true)
@@ -926,6 +937,18 @@ function StudentSettingsView() {
                     <MenuItem value="อื่น ๆ">อื่น ๆ</MenuItem>
                   </TextField>
                 </Box>
+              ) : row.key === 'dateOfBirth' ? (
+                <Box key={row.key} sx={{ display: 'contents' }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                  <TextField
+                    size="small"
+                    type="date"
+                    value={draft.dateOfBirth}
+                    onChange={(e) => setDraft({ ...draft, dateOfBirth: e.target.value })}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
+                  />
+                </Box>
               ) : (
                 <Box key={row.key} sx={{ display: 'contents' }}>
                   <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
@@ -933,8 +956,9 @@ function StudentSettingsView() {
                     size="small"
                     value={draft[row.key]}
                     onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
-                    multiline={row.key === 'skills'}
-                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: row.key === 'address' || row.key === 'skills' ? 480 : 320 }}
+                    multiline={row.key === 'skills' || row.key === 'availableTime'}
+                    placeholder={row.key === 'availableTime' ? 'เช่น จ-ศ หลัง 16:00, ส-อา ทั้งวัน' : undefined}
+                    sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: row.key === 'address' || row.key === 'skills' || row.key === 'availableTime' ? 480 : 320 }}
                   />
                 </Box>
               ),
@@ -946,7 +970,9 @@ function StudentSettingsView() {
               <Box key={row.key} sx={{ display: 'contents' }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
                 <Typography sx={{ fontSize: 16, color: profile[row.key] ? '#000' : '#9AA0A6' }}>
-                  {profile[row.key] || 'ยังไม่ระบุ'}
+                  {row.key === 'dateOfBirth' && profile.dateOfBirth
+                    ? `${profile.dateOfBirth}${profile.age ? ` (อายุ ${profile.age} ปี)` : ''}`
+                    : profile[row.key] || 'ยังไม่ระบุ'}
                 </Typography>
               </Box>
             ))}

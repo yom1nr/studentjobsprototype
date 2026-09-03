@@ -27,6 +27,16 @@ import { upsertMyStudentProfile } from '../../../services/https/student'
 
 const colors = { navy: '#000349', bg: '#DAEAF7' }
 
+function calcAgeFromDob(dob: string): number {
+  const d = new Date(dob)
+  if (Number.isNaN(d.getTime())) return 0
+  const now = new Date()
+  let age = now.getFullYear() - d.getFullYear()
+  const m = now.getMonth() - d.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--
+  return Math.max(0, age)
+}
+
 type FormState = {
   studentId: string
   userName: string
@@ -36,7 +46,7 @@ type FormState = {
   firstName: string
   lastName: string
   gender: string
-  age: string
+  dob: string
   address: string
   university: string
   faculty: string
@@ -55,7 +65,7 @@ const INITIAL: FormState = {
   firstName: '',
   lastName: '',
   gender: '',
-  age: '',
+  dob: '',
   address: '',
   university: '',
   faculty: '',
@@ -139,6 +149,7 @@ export default function RegisterStudentPage() {
       await upsertMyStudentProfile(token, {
         first_name: form.firstName.trim(),
         last_name: form.lastName.trim(),
+        date_of_birth: form.dob || undefined,
         address: form.address.trim() || undefined,
         university: form.university.trim() || undefined,
         faculty: form.faculty.trim() || undefined,
@@ -270,7 +281,15 @@ export default function RegisterStudentPage() {
                 <MenuItem value="female">หญิง</MenuItem>
                 <MenuItem value="other">อื่น ๆ</MenuItem>
               </TextField>
-              <TextField label="อายุ" type="number" value={form.age} onChange={(e) => set('age', e.target.value)} placeholder="กรอกอายุ" fullWidth />
+              <TextField
+                label="วันเกิด"
+                type="date"
+                value={form.dob}
+                onChange={(e) => set('dob', e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                helperText={form.dob ? `อายุ ${calcAgeFromDob(form.dob)} ปี` : ' '}
+                fullWidth
+              />
               <TextField
                 label="ที่อยู่"
                 value={form.address}

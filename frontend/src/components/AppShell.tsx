@@ -189,25 +189,41 @@ function AppShellInner() {
   // User initials
   const initials = user?.user_name ? user.user_name.charAt(0).toUpperCase() : '?'
 
-  const jobsNavItem = jobsNavItemByRole[user?.role ?? 'student'] ?? jobsNavItemByRole.student
-  const applicationsNavItem = applicationsNavItemByRole[user?.role ?? 'student'] ?? applicationsNavItemByRole.student
-  const payrollNavItem = payrollNavItemByRole[user?.role ?? 'student'] ?? payrollNavItemByRole.student
-  const interviewsNavItem = interviewsNavItemByRole[user?.role ?? 'student'] ?? interviewsNavItemByRole.student
-  const employmentNavItem = employmentNavItemByRole[user?.role ?? 'student'] ?? employmentNavItemByRole.student
-  const visibleMainNavItems = [
-    mainNavItems[0], // หน้าหลัก
-    jobsNavItem,
-    mainNavItems[1], // งานของฉัน
-    applicationsNavItem,
-    interviewsNavItem,
-    employmentNavItem,
-    mainNavItems[2], // เวลาทำงาน
-    payrollNavItem,
-    mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
-    ...(user?.role === 'admin'
-      ? [adminApplicationsNavItem, adminNavItem, adminEmployerDirectoryNavItem, adminStudentDirectoryNavItem]
-      : []),
-  ]
+  // Each role gets its own menu — student and employer share several routes
+  // (different labels, same page) but never see each other's actions, and admin
+  // only sees the review/directory tools.
+  const navByRole: Record<string, NavItem[]> = {
+    student: [
+      mainNavItems[0], // หน้าหลัก
+      jobsNavItemByRole.student, // ค้นหางาน
+      mainNavItems[1], // งานของฉัน
+      applicationsNavItemByRole.student, // ใบสมัครงาน
+      interviewsNavItemByRole.student, // กำหนดการสัมภาษณ์ / ผล
+      employmentNavItemByRole.student, // แจ้งผลการจ้างงาน
+      mainNavItems[2], // เวลาทำงาน
+      payrollNavItemByRole.student, // รายรับ
+      mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
+    ],
+    employer: [
+      mainNavItems[0],
+      jobsNavItemByRole.employer, // ประกาศงาน
+      applicationsNavItemByRole.employer, // ผู้สมัครงาน
+      interviewsNavItemByRole.employer, // จัดการนัดหมายสัมภาษณ์
+      employmentNavItemByRole.employer, // ตกลงการจ้างงาน
+      mainNavItems[2], // เวลาทำงาน (อนุมัติคำร้องแก้เวลา)
+      payrollNavItemByRole.employer, // ค่าตอบแทน
+      mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
+    ],
+    admin: [
+      mainNavItems[0],
+      adminApplicationsNavItem, // ตรวจสอบใบสมัคร
+      adminNavItem, // อนุมัติผู้ประกอบการ
+      adminEmployerDirectoryNavItem, // รายชื่อผู้ประกอบการ
+      adminStudentDirectoryNavItem, // รายชื่อนักศึกษา
+      mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
+    ],
+  }
+  const visibleMainNavItems = navByRole[user?.role ?? 'student'] ?? navByRole.student
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>

@@ -7,9 +7,11 @@
 - `backend/` — Go (Gin + GORM + PostgreSQL), เสิร์ฟ REST API ที่ `:8080`
 - `frontend/` — React + TypeScript + Vite + MUI, เสิร์ฟที่ `:5173`
 
+ฟีเจอร์หลัก: ค้นหา/สมัครงาน (กรองตามเวลาว่าง + ระยะทาง) → สัมภาษณ์ → เซ็นสัญญาจ้าง → บันทึกเวลาทำงาน → จ่ายค่าตอบแทน → แจ้งปัญหา/ร้องเรียน ฝั่งเจ้าหน้าที่มีอนุมัติผู้ประกอบการ + ขอเอกสารเพิ่ม, ตรวจใบสมัคร, รายชื่อ/แก้ไขข้อมูลผู้ประกอบการ-นักศึกษา (พร้อม audit log ทุกการแก้ไข)
+
 ## สิ่งที่ต้องติดตั้งก่อน
 
-- [Go](https://go.dev/dl/) 1.22 ขึ้นไป
+- [Go](https://go.dev/dl/) 1.26 ขึ้นไป (ตาม `backend/go.mod`)
 - [Node.js](https://nodejs.org/) 18 ขึ้นไป (มี npm มาด้วย)
 - PostgreSQL — จะรันเองในเครื่อง หรือใช้ Docker ก็ได้ (ดูตัวเลือกด้านล่าง)
 
@@ -37,7 +39,7 @@ docker exec sat04-postgres psql -U postgres -c "CREATE DATABASE sat04db;"
 
 ## 2. รัน Backend
 
-สร้างไฟล์ `backend/.env` ขึ้นมาเอง (ไม่มีมาให้ในโปรเจกต์ และ git ไม่เก็บไฟล์นี้) แล้วใส่ค่าให้ตรงกับ Postgres ที่เตรียมไว้ในขั้นตอนที่ 1:
+คัดลอก `backend/.env.example` เป็น `backend/.env` (git ไม่เก็บ `.env`) แล้วปรับค่าให้ตรงกับ Postgres ในขั้นตอนที่ 1:
 
 ```env
 DB_HOST=localhost
@@ -48,6 +50,15 @@ DB_NAME=sat04db
 JWT_SECRET=replace_with_a_strong_secret
 JWT_EXPIRES_IN=24h
 SERVER_PORT=8080
+
+# origin ของ frontend ที่อนุญาตให้เรียก API (คั่นด้วย ,) — ไม่ตั้งก็ได้
+# default = http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173
+CORS_ALLOWED_ORIGINS=http://localhost:5173
+
+# ไม่บังคับ — เปิดปุ่ม "สแกนตารางเรียน (AI)" ในหน้าตั้งค่านักศึกษา
+# ขอ key ฟรีที่ https://aistudio.google.com/apikey  ไม่ตั้ง = ปุ่มขึ้น "กรอกเวลาว่างเอง" เฉย ๆ
+GEMINI_API_KEY=
+# GEMINI_MODEL=gemini-3.6-flash   # override ชื่อรุ่นถ้า Google retire รุ่น default
 ```
 
 > `DB_USER` / `DB_PASSWORD` ต้องตรงกับ container ที่ใช้จริง — ค่า `postgres/postgres` ด้านบนใช้ได้เมื่อสร้าง container ใหม่ตามขั้นตอนที่ 1 แต่ถ้าไปใช้ Postgres ตัวที่มีอยู่แล้ว ต้องเปลี่ยนเป็น user/password ของตัวนั้น
@@ -64,6 +75,13 @@ go run ./cmd/server
 > go build -o ./bin/server.exe ./cmd/server
 > ./bin/server.exe
 > ```
+> **ถ้า `go build` ก็ยังถูกบล็อก** (Device Guard บางเครื่องบล็อก `.exe` ที่ build เองทั้งหมด) — รัน backend ผ่าน Docker แทน จาก `backend/`:
+> ```bash
+> docker build -t t04-backend .
+> docker run -d --name t04-backend -p 8080:8080 --env-file .env \
+>   -e DB_HOST=host.docker.internal t04-backend
+> ```
+> (ถ้า Postgres รันเป็น container บน network เดียวกัน ให้ใช้ `--network <ชื่อ> -e DB_HOST=<ชื่อ-container-postgres>` แทน `host.docker.internal`)
 
 รันสำเร็จจะเห็น log ว่า server ฟังอยู่ที่ `:8080` และมี log สร้าง seed user ให้ (ดูรายชื่อบัญชีทดสอบด้านล่าง)
 
@@ -93,6 +111,10 @@ VITE_API_BASE_URL=http://localhost:8080
 | ผู้ประกอบการ | `somying@example.com` | `securepass456` |
 | แอดมิน (เจ้าหน้าที่มหาวิทยาลัย) | `sompong@example.com` | `adminpass789` |
 
+> seeder สร้างแค่ **บัญชี** ของ `somchai` ไม่ได้สร้างโปรไฟล์นักศึกษาให้ — ถ้าจะทดสอบหน้าที่ต้องมีโปรไฟล์ (เช่น สัมภาษณ์) ให้กรอกโปรไฟล์ผ่านหน้า "ตั้งค่า" ก่อน หรือสมัครบัญชีนักศึกษาใหม่
+
+> **นโยบายรหัสผ่าน**: ตอนสมัครและตอนเปลี่ยนรหัสผ่าน รหัสต้องยาว ≥ 8 ตัว และมีทั้งตัวอักษรและตัวเลข
+
 หน้าแรกที่ยังไม่ login (`/`) จะเป็น landing page — กด "เริ่มต้นหางานเลย" เพื่อดูประกาศงานแบบไม่ต้อง login ได้เลย หรือกด "เข้าสู่ระบบ" แล้วใช้บัญชีด้านบน
 
 > **ทดสอบหลาย role พร้อมกัน ให้ใช้หน้าต่าง Incognito แยก** — token เก็บใน `localStorage` ซึ่งใช้ร่วมกันทุกแท็บของเบราว์เซอร์เดียวกัน ถ้า login คนละ role คนละแท็บแบบปกติ อันหลังจะทับอันแรกทันที
@@ -117,6 +139,8 @@ VITE_API_BASE_URL=http://localhost:8080
 | `password authentication failed` | `DB_USER` / `DB_PASSWORD` ใน `.env` ไม่ตรงกับ container ที่ใช้จริง |
 | `database "sat04db" does not exist` | ยังไม่ได้สร้าง DB → ทำขั้นตอนที่ 1 ให้ครบ |
 | หน้าเว็บโหลดข้อมูลไม่ได้ / ขึ้น error สีแดง | backend ดับ → ดู terminal ที่ 1 |
+| เบราว์เซอร์ขึ้น `CORS` / `blocked by CORS policy` | frontend รันคนละ origin กับที่ backend อนุญาต → เพิ่ม origin นั้นใน `CORS_ALLOWED_ORIGINS` ของ `backend/.env` แล้วรีสตาร์ท backend |
+| ปุ่ม "สแกนตารางเรียน (AI)" ขึ้น "ยังไม่พร้อมใช้งาน" | ยังไม่ได้ตั้ง `GEMINI_API_KEY` — เป็นฟีเจอร์เสริม กรอกเวลาว่างเองได้ตามปกติ |
 | เมนู/สิทธิ์ขึ้นผิด role | login หลาย role ในเบราว์เซอร์เดียวกัน → refresh แล้ว login ใหม่ หรือใช้ Incognito แยก |
 
 ## โครงสร้างโปรเจกต์ (คร่าว ๆ)
@@ -130,9 +154,11 @@ backend/
   internal/controllers/ business logic ต่อ endpoint
   internal/routes/      ผูก route ทั้งหมด
   internal/middleware/  JWT auth / role guard
+  internal/utils/       JWT, hash รหัสผ่าน, response helper, ตรวจรหัสผ่าน, เรียก Gemini
 
 frontend/
   src/pages/            หน้าแต่ละหน้า แยกตาม role ในไฟล์เดียวกัน (ดู useAuth().user.role)
+  src/components/        component ที่ใช้ซ้ำ (AppShell, AuditTrail, UploadCard ฯลฯ)
   src/services/https/   ฟังก์ชันเรียก API (fetch wrapper)
   src/interface/        TypeScript types ของแต่ละ endpoint
   src/routes/            ผูก route ของ React Router

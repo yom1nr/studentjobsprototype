@@ -35,7 +35,7 @@ func (h *StudentController) GetMyProfile(c *gin.Context) {
 
     student, err := h.findByUserID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "failed to load profile", err.Error())
+        utils.JSONInternalError(c, "failed to load profile", err)
         return
     }
     if student == nil {
@@ -46,7 +46,8 @@ func (h *StudentController) GetMyProfile(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapStudentToResponse(student))
 }
 
-// UpsertMyProfile creates or updates the current student's profile.
+// UpsertMyProfile creates or updates the current student's profile. Phone,
+// gender and avatar are mirrored onto the User account.
 func (h *StudentController) UpsertMyProfile(c *gin.Context) {
     userID, ok := utils.GetUserIDFromContext(c)
     if !ok {
@@ -66,7 +67,7 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
 
     student, err := h.findByUserID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+        utils.JSONInternalError(c, "update failed", err)
         return
     }
 
@@ -83,23 +84,56 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
     student.Major = payload.Major
     student.Years = payload.Years
     student.Skill = payload.Skill
+    student.AvailableTime = payload.AvailableTime
 
-    if isNew {
-        if err := h.db.Create(student).Error; err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
-            return
-        }
-    } else if err := h.db.Save(student).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+    if payload.DateOfBirth == "" {
+        student.DateOfBirth = nil
+    } else if dob, perr := time.Parse("2006-01-02", payload.DateOfBirth); perr == nil {
+        student.DateOfBirth = &dob
+    }
+
+    // Mirror the account-level fields onto the User row.
+    var user models.User
+    if err := h.db.First(&user, userID).Error; err != nil {
+        utils.JSONInternalError(c, "update failed", err)
         return
     }
+    changed := false
+    if payload.Phone != "" && payload.Phone != user.Phone {
+        user.Phone, changed = payload.Phone, true
+    }
+    if payload.Gender != "" && payload.Gender != user.Gender {
+        user.Gender, changed = payload.Gender, true
+    }
+    if payload.Avatar != "" && payload.Avatar != user.Avatar {
+        user.Avatar, changed = payload.Avatar, true
+    }
+
+    txErr := h.db.Transaction(func(tx *gorm.DB) error {
+        if isNew {
+            if err := tx.Create(student).Error; err != nil {
+                return err
+            }
+        } else if err := tx.Save(student).Error; err != nil {
+            return err
+        }
+        if changed {
+            return tx.Save(&user).Error
+        }
+        return nil
+    })
+    if txErr != nil {
+        utils.JSONInternalError(c, "update failed", txErr)
+        return
+    }
+    student.User = &user
 
     utils.JSONSuccess(c, http.StatusOK, mapStudentToResponse(student))
 }
 
 func (h *StudentController) findByUserID(userID uint) (*models.Student, error) {
     var student models.Student
-    err := h.db.Where("user_id = ?", userID).First(&student).Error
+    err := h.db.Preload("User").Where("user_id = ?", userID).First(&student).Error
     if err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             return nil, nil
@@ -110,18 +144,37 @@ func (h *StudentController) findByUserID(userID uint) (*models.Student, error) {
 }
 
 func mapStudentToResponse(student *models.Student) *dto.StudentProfileResponse {
+    dob, age := "", 0
+    if student.DateOfBirth != nil {
+        dob = student.DateOfBirth.Format("2006-01-02")
+        age = utils.CalcAge(*student.DateOfBirth)
+    }
+
+    gender, phone, avatar := "", "", ""
+    if student.User != nil {
+        gender = student.User.Gender
+        phone = student.User.Phone
+        avatar = student.User.Avatar
+    }
+
     return &dto.StudentProfileResponse{
-        ID:         student.UserID,
-        UserID:     student.UserID,
-        FirstName:  student.FirstName,
-        LastName:   student.LastName,
-        Address:    student.Address,
-        University: student.University,
-        Faculty:    student.Faculty,
-        Major:      student.Major,
-        Years:      student.Years,
-        Skill:      student.Skill,
-        CreatedAt:  student.CreatedAt.Format(time.RFC3339),
-        UpdatedAt:  student.UpdatedAt.Format(time.RFC3339),
+        ID:            student.UserID,
+        UserID:        student.UserID,
+        FirstName:     student.FirstName,
+        LastName:      student.LastName,
+        DateOfBirth:   dob,
+        Age:           age,
+        Gender:        gender,
+        Phone:         phone,
+        Address:       student.Address,
+        University:    student.University,
+        Faculty:       student.Faculty,
+        Major:         student.Major,
+        Years:         student.Years,
+        Skill:         student.Skill,
+        AvailableTime: student.AvailableTime,
+        Avatar:        avatar,
+        CreatedAt:     student.CreatedAt.Format(time.RFC3339),
+        UpdatedAt:     student.UpdatedAt.Format(time.RFC3339),
     }
 }

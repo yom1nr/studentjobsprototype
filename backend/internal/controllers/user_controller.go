@@ -224,6 +224,7 @@ func mapUserToResponse(user *models.User) *dto.UserResponse {
         Email:     user.Email,
         Phone:     user.Phone,
         Gender:    user.Gender,
+        Avatar:    user.Avatar,
         Role:      user.Role,
         CreatedAt: user.CreatedAt.Format(time.RFC3339),
         UpdatedAt: user.UpdatedAt.Format(time.RFC3339),

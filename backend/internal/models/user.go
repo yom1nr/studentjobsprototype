@@ -12,6 +12,7 @@ type User struct {
 	Email    string `gorm:"size:150;uniqueIndex;not null" json:"email"`
 	Phone    string `gorm:"size:20" json:"phone"`
 	Gender   string `gorm:"size:20" json:"gender"`
+	Avatar   string `gorm:"type:text" json:"avatar"` // profile-picture URL from POST /upload
 	Role     string `gorm:"size:20;not null;default:'student'" json:"role"` // student | employer | admin
 
 	// 1-to-1 Profiles
@@ -36,8 +37,11 @@ type Student struct {
 	Major       string     `gorm:"size:150" json:"major"`
 	Years       string     `gorm:"size:10" json:"years"`
 	Skill       string     `gorm:"type:text" json:"skill"`
-	CreatedAt   time.Time  `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+	// AvailableTime is the student's free-time text used by job search (FR5),
+	// e.g. "จ-ศ หลัง 16:00, ส-อา ทั้งวัน".
+	AvailableTime string    `gorm:"type:text" json:"available_time"`
+	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // Employer profile – linked to a User account (1-to-1).

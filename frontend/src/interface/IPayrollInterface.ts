@@ -23,3 +23,24 @@ export type CreatePayrollRequest = {
   cycle_start_date: string
   cycle_end_date: string
 }
+
+export type PayrollSummaryStudentRow = {
+  student_id: number
+  student_name: string
+  cycles: number
+  total_hours: number
+  total_amount: number
+  paid_amount: number
+  pending_amount: number
+}
+
+export type PayrollSummary = {
+  month: string // YYYY-MM
+  total_cycles: number
+  total_hours: number
+  total_amount: number
+  paid_amount: number
+  pending_amount: number
+  confirmed_count: number
+  by_student: PayrollSummaryStudentRow[]
+}

@@ -31,7 +31,19 @@ export type UpsertJobpostRequest = {
   quantity?: number
 }
 
-export type ApplicationStatus = 'pending' | 'accepted' | 'rejected'
+export type ApplicationStatus = 'pending' | 'correction_requested' | 'accepted' | 'rejected'
+
+export type ApplicationDocument = {
+  name: string
+  url: string
+}
+
+export type ApplicationAuditEntry = {
+  result_status: 'accepted' | 'rejected' | 'correction_requested' | 'resubmitted' | 'passed' | 'failed'
+  comment: string
+  checked_at: string
+  by_admin: boolean
+}
 
 export type Application = {
   id: number
@@ -46,6 +58,8 @@ export type Application = {
   remarks: string
   status: ApplicationStatus
   apply_date: string
+  documents: ApplicationDocument[]
+  audits: ApplicationAuditEntry[]
 }
 
 export type CreateApplicationRequest = {
@@ -53,8 +67,15 @@ export type CreateApplicationRequest = {
   remarks?: string
 }
 
-// "correction_requested" only ever appears as a review action/audit entry — it
-// leaves Application.status ("pending"/"accepted"/"rejected") unchanged.
+// The student's revise-and-resubmit payload for a still-open application
+// (status pending or correction_requested). Replaces remarks + the document set.
+export type UpdateApplicationRequest = {
+  remarks: string
+  documents: ApplicationDocument[]
+}
+
+// "correction_requested" re-opens the application for the student; "resubmitted"
+// is logged when they send their revision back.
 export type ApplicationReviewResult = 'accepted' | 'rejected' | 'correction_requested'
 
 export type ReviewApplicationRequest = {

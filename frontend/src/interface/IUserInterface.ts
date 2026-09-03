@@ -4,7 +4,7 @@ export type User = {
   email: string
   phone: string
   gender: string
-  avatar?: string
+  avatar: string
   role: string   // 'student' | 'employer' | 'admin'
   created_at: string
   updated_at: string
@@ -17,6 +17,5 @@ export type UpdateProfileRequest = {
   password?: string
   phone?: string
   gender?: string
-  avatar?: string
   role?: string
 }

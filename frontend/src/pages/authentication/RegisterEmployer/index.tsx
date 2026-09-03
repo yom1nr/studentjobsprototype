@@ -117,10 +117,12 @@ export default function RegisterEmployerPage() {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  const passwordOk = form.password.length >= 8 && /[a-zA-Z]/.test(form.password) && /[0-9]/.test(form.password)
+
   const page1Valid =
     form.userName.trim().length >= 2 &&
     form.email.trim().length > 0 &&
-    form.password.length >= 8 &&
+    passwordOk &&
     form.password === form.confirmPassword &&
     form.companyName.trim().length > 0 &&
     form.taxId.trim().length > 0 &&

@@ -12,6 +12,7 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { ApiError } from '../../services/https'
 import { listEmployerApplications } from '../../services/https/applications'
 import { acceptAgreement, createAgreement, listMyAgreements, rejectAgreement } from '../../services/https/agreements'
+import { listMyInterviews } from '../../services/https/interviews'
 import type { Application } from '../../interface/IJobInterface'
 import type { AgreementRecord } from '../../interface/IInterviewInterface'
 
@@ -278,6 +279,7 @@ function EmployerEmploymentView() {
 
   const [tab, setTab] = useState<AgreementTab>('create')
   const [applications, setApplications] = useState<Application[]>([])
+  const [passedStudentIds, setPassedStudentIds] = useState<Set<number>>(new Set())
   const [agreements, setAgreements] = useState<AgreementRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -297,9 +299,10 @@ function EmployerEmploymentView() {
     if (!token) return
     setLoading(true)
     try {
-      const [apps, agrs] = await Promise.all([listEmployerApplications(token), listMyAgreements(token)])
+      const [apps, agrs, interviews] = await Promise.all([listEmployerApplications(token), listMyAgreements(token), listMyInterviews(token)])
       setApplications(apps.filter((a) => a.status === 'accepted'))
       setAgreements(agrs)
+      setPassedStudentIds(new Set(interviews.filter((i) => i.result === 'passed').map((i) => i.student_id)))
     } catch (err) {
       setError(apiErrorMessage(err, 'โหลดข้อมูลไม่สำเร็จ'))
     } finally {
@@ -313,10 +316,11 @@ function EmployerEmploymentView() {
     async function doLoad() {
       setLoading(true)
       try {
-        const [apps, agrs] = await Promise.all([listEmployerApplications(token!), listMyAgreements(token!)])
+        const [apps, agrs, interviews] = await Promise.all([listEmployerApplications(token!), listMyAgreements(token!), listMyInterviews(token!)])
         if (cancelled) return
         setApplications(apps.filter((a) => a.status === 'accepted'))
         setAgreements(agrs)
+        setPassedStudentIds(new Set(interviews.filter((i) => i.result === 'passed').map((i) => i.student_id)))
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลไม่สำเร็จ'))
       } finally {
@@ -328,7 +332,11 @@ function EmployerEmploymentView() {
   }, [token])
 
   const agreedStudentIds = new Set(agreements.map((a) => a.student_id))
-  const eligibleCandidates = applications.filter((a) => !agreedStudentIds.has(a.student_id))
+  // An agreement covers the student, not one application, so a candidate holding
+  // several accepted applications must still appear once in the list.
+  const eligibleCandidates = applications
+    .filter((a) => passedStudentIds.has(a.student_id) && !agreedStudentIds.has(a.student_id))
+    .filter((a, i, all) => all.findIndex((other) => other.student_id === a.student_id) === i)
   const selectedCandidate = applications.find((a) => a.student_id === studentId) ?? null
 
   async function send() {
@@ -384,11 +392,16 @@ function EmployerEmploymentView() {
               sx={{ mb: 2 }}
               slotProps={{ select: { displayEmpty: true } }}
             >
-              <MenuItem value="" disabled>— เลือกผู้สมัครที่ผ่านการคัดเลือก —</MenuItem>
+              <MenuItem value="" disabled>— เลือกผู้สมัครที่ผ่านการสัมภาษณ์ —</MenuItem>
               {eligibleCandidates.map((a) => (
                 <MenuItem key={a.student_id} value={a.student_id}>{a.student_name} — {a.position}</MenuItem>
               ))}
             </TextField>
+            {eligibleCandidates.length === 0 && (
+              <Typography sx={{ fontSize: 12, color: '#9AA0A6', mt: -1.5, mb: 2 }}>
+                ยังไม่มีผู้สมัครที่พร้อมทำสัญญา — ต้องนัดสัมภาษณ์และประกาศผล &quot;ผ่าน&quot; ที่เมนู &quot;จัดการนัดหมายสัมภาษณ์&quot; ก่อน
+              </Typography>
+            )}
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <TextField label="วันที่เริ่มงาน" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} />
               <TextField label="ระยะเวลา (เดือน)" type="number" value={durationMonths} onChange={(e) => setDurationMonths(Number(e.target.value))} fullWidth />

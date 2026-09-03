@@ -100,6 +100,10 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
             utils.JSONError(c, http.StatusBadRequest, "update failed", "current password is incorrect")
             return
         }
+        if err := utils.ValidatePasswordStrength(payload.Password); err != nil {
+            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            return
+        }
 
         hashedPassword, err := utils.HashPassword(payload.Password)
         if err != nil {
@@ -113,9 +117,6 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
     }
     if payload.Gender != "" {
         user.Gender = payload.Gender
-    }
-    if payload.Avatar != "" {
-        user.Avatar = payload.Avatar
     }
 
     user.UpdatedAt = time.Now().UTC()

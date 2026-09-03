@@ -1,7 +1,10 @@
 # Environment variables — never commit secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# Uploaded user files — served at runtime, never committed
+uploads/
 
 # Go build output
 bin/

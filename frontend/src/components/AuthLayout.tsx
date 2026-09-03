@@ -1,6 +1,6 @@
 import { Box, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
-import studentLogo from '../assets/student-logo.png'
+import studentLogo from '../assets/student-logo.svg'
 
 const colors = { bg: '#DAEAF7', navy: '#000349' }
 

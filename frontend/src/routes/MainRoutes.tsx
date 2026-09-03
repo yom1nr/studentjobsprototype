@@ -27,6 +27,8 @@ import NotificationsPage from '../pages/notifications'
 import SettingsPage from '../pages/settings'
 import AdminEmployerApprovalsPage from '../pages/admin'
 import AdminApplicationVerificationPage from '../pages/admin/applications'
+import AdminEmployerDirectoryPage from '../pages/admin/employers'
+import AdminStudentDirectoryPage from '../pages/admin/students'
 import NotFoundPage from '../pages/not-found'
 
 function HomeRedirect() {
@@ -89,6 +91,8 @@ export function MainRoutes() {
             <Route element={<RoleRoute allow={['admin']} />}>
               <Route path="/admin/employers" element={<AdminEmployerApprovalsPage />} />
               <Route path="/admin/applications" element={<AdminApplicationVerificationPage />} />
+              <Route path="/admin/employer-directory" element={<AdminEmployerDirectoryPage />} />
+              <Route path="/admin/student-directory" element={<AdminStudentDirectoryPage />} />
             </Route>
           </Route>
         </Route>

@@ -15,7 +15,7 @@ import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlin
 import SupportAgentOutlinedIcon from '@mui/icons-material/SupportAgentOutlined'
 import type { SvgIconComponent } from '@mui/icons-material'
 import { usePageTitle } from '../../components/usePageTitle'
-import studentLogo from '../../assets/studentlogo.png'
+import studentLogo from '../../assets/student-logo.svg'
 
 const colors = {
   navy: '#000349',

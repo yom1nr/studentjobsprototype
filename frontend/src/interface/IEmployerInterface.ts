@@ -10,6 +10,9 @@ export type EmployerProfile = {
   tax_id: string
   link: string
   company_address: string
+  company_regis: string
+  logo: string
+  card_id: string
   approve_status: string
   created_at: string
   updated_at: string
@@ -25,4 +28,7 @@ export type UpsertEmployerProfileRequest = {
   tax_id: string
   link?: string
   company_address?: string
+  company_regis?: string
+  logo?: string
+  card_id?: string
 }

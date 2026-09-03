@@ -375,7 +375,7 @@ function EmployerInterviewsView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null)
+  const [selectedApplicationId, setSelectedApplicationId] = useState<number | null>(null)
   const [subview, setSubview] = useState<EmployerSubview>('picker')
 
   const [scheduleDate, setScheduleDate] = useState('')
@@ -427,23 +427,25 @@ function EmployerInterviewsView() {
     return () => { cancelled = true }
   }, [token])
 
-  function interviewFor(studentId: number): InterviewScheduleRecord | null {
-    return interviews.find((iv) => iv.student_id === studentId) ?? null
+  // Matched per application, not per student: one candidate can hold several
+  // accepted applications with this employer, and each is scheduled separately.
+  function interviewFor(applicationId: number): InterviewScheduleRecord | null {
+    return interviews.find((iv) => iv.application_id === applicationId) ?? null
   }
 
-  const notScheduled = applications.filter((a) => !interviewFor(a.student_id))
-  const scheduled = applications.filter((a) => interviewFor(a.student_id))
+  const notScheduled = applications.filter((a) => !interviewFor(a.id))
+  const scheduled = applications.filter((a) => interviewFor(a.id))
 
-  const selectedApplication = applications.find((a) => a.student_id === selectedStudentId) ?? null
-  const selectedInterview = selectedStudentId ? interviewFor(selectedStudentId) : null
+  const selectedApplication = applications.find((a) => a.id === selectedApplicationId) ?? null
+  const selectedInterview = selectedApplicationId ? interviewFor(selectedApplicationId) : null
 
-  function pick(studentId: number) {
-    setSelectedStudentId(studentId)
+  function pick(applicationId: number) {
+    setSelectedApplicationId(applicationId)
     setSubview('hub')
   }
 
   async function submitSchedule() {
-    if (!token || !selectedStudentId) return
+    if (!token || !selectedApplicationId) return
     setScheduleSubmitting(true)
     try {
       const payload = {
@@ -456,7 +458,7 @@ function EmployerInterviewsView() {
       if (selectedInterview) {
         await updateInterview(token, selectedInterview.id, payload)
       } else {
-        await createInterview(token, { student_id: selectedStudentId, ...payload })
+        await createInterview(token, { application_id: selectedApplicationId, ...payload })
       }
       await load()
       setSubview('hub')
@@ -527,9 +529,21 @@ function EmployerInterviewsView() {
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Chip
-          label={selectedInterview ? 'มีนัดสัมภาษณ์แล้ว' : 'ยังไม่มีนัดสัมภาษณ์'}
+          label={
+            !selectedInterview
+              ? 'ยังไม่มีนัดสัมภาษณ์'
+              : selectedInterview.result === 'passed'
+                ? 'ผ่านการสัมภาษณ์'
+                : selectedInterview.result === 'failed'
+                  ? 'ไม่ผ่านการสัมภาษณ์'
+                  : 'มีนัดสัมภาษณ์ — รอผล'
+          }
           size="small"
-          sx={{ bgcolor: selectedInterview ? '#EAF7EA' : '#F0F0F0', color: selectedInterview ? colors.ok : '#697077', fontWeight: 600 }}
+          sx={{
+            bgcolor: !selectedInterview ? '#F0F0F0' : selectedInterview.result === 'passed' ? '#EAF7EA' : selectedInterview.result === 'failed' ? '#FDEAEA' : '#FFF0DD',
+            color: !selectedInterview ? '#697077' : selectedInterview.result === 'passed' ? colors.ok : selectedInterview.result === 'failed' ? '#DA1E28' : '#B5850C',
+            fontWeight: 600,
+          }}
         />
         <Button onClick={() => setSubview('picker')} size="small" sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy, px: 2 }}>
           ← เปลี่ยนผู้สมัคร
@@ -557,7 +571,7 @@ function EmployerInterviewsView() {
             </Box>
             <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>ผ่านการคัดเลือกใบสมัครแล้ว รอนัดสัมภาษณ์</Typography>
             {notScheduled.map((a) => (
-              <Box key={a.student_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
+              <Box key={a.id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                   <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>{a.student_name.charAt(0)}</Box>
                   <Box>
@@ -565,7 +579,7 @@ function EmployerInterviewsView() {
                     <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{a.position}</Typography>
                   </Box>
                 </Box>
-                <Button onClick={() => pick(a.student_id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
+                <Button onClick={() => pick(a.id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
               </Box>
             ))}
             {notScheduled.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 2 }}>ไม่มีรายการ</Typography>}
@@ -577,7 +591,7 @@ function EmployerInterviewsView() {
             </Box>
             <Typography sx={{ fontSize: 12, color: '#9AA0A6', mb: 1.5 }}>มีนัดสัมภาษณ์แล้ว — พร้อมแจ้งผลและจัดทำข้อตกลงการจ้างงาน</Typography>
             {scheduled.map((a) => (
-              <Box key={a.student_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
+              <Box key={a.id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 3, p: 1.5, mb: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                   <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: '#EFF6FF', color: colors.navy, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>{a.student_name.charAt(0)}</Box>
                   <Box>
@@ -585,7 +599,7 @@ function EmployerInterviewsView() {
                     <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>{a.position}</Typography>
                   </Box>
                 </Box>
-                <Button onClick={() => pick(a.student_id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
+                <Button onClick={() => pick(a.id)} size="small" endIcon={<ArrowForwardIcon fontSize="small" />} sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: colors.navy, color: '#fff', px: 2 }}>เลือก</Button>
               </Box>
             ))}
             {scheduled.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 2 }}>ไม่มีรายการ</Typography>}
@@ -596,7 +610,11 @@ function EmployerInterviewsView() {
   }
 
   if (subview === 'hub') {
-    const unlocked = !!selectedInterview
+    const unlocked = selectedInterview?.result === 'passed'
+    // Once the result is out the appointment is closed: it can't be re-timed,
+    // re-announced, or edited, so those rows are shown as unavailable rather
+    // than letting the click fail against the backend's guard.
+    const announced = !!selectedInterview?.result
     return (
       <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
         <ErrorAlert message={error} />
@@ -618,11 +636,11 @@ function EmployerInterviewsView() {
               <Chip label="พร้อมใช้งาน" size="small" sx={{ bgcolor: '#EAF7EA', color: colors.ok, fontWeight: 600 }} />
             </Box>
             {[
-              { icon: <EventOutlinedIcon fontSize="small" />, label: selectedInterview ? 'แก้ไขนัดหมายสัมภาษณ์' : 'กำหนดนัดหมายสัมภาษณ์', action: openSchedule },
+              { icon: <EventOutlinedIcon fontSize="small" />, label: selectedInterview ? 'แก้ไขนัดหมายสัมภาษณ์' : 'กำหนดนัดหมายสัมภาษณ์', action: openSchedule, disabled: announced },
               { icon: <VisibilityOutlinedIcon fontSize="small" />, label: 'รายละเอียดนัดหมาย', action: () => setSubview('detail'), disabled: !selectedInterview },
-              { icon: <AutorenewOutlinedIcon fontSize="small" />, label: 'ขอเปลี่ยน / เลื่อนกำหนดการ', action: () => setSubview('reschedule'), disabled: !selectedInterview },
+              { icon: <AutorenewOutlinedIcon fontSize="small" />, label: 'ขอเปลี่ยน / เลื่อนกำหนดการ', action: () => setSubview('reschedule'), disabled: !selectedInterview || announced },
               { icon: <NotificationsNoneOutlinedIcon fontSize="small" />, label: 'การแจ้งเตือน', action: () => navigate('/notifications') },
-              { icon: <CampaignOutlinedIcon fontSize="small" />, label: 'แจ้งผลการพิจารณาการสัมภาษณ์', action: () => setSubview('results'), disabled: !selectedInterview },
+              { icon: <CampaignOutlinedIcon fontSize="small" />, label: 'แจ้งผลการพิจารณาการสัมภาษณ์', action: () => setSubview('results'), disabled: !selectedInterview || announced },
             ].map((row) => (
               <Box key={row.label} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5, mb: 1.25, opacity: row.disabled ? 0.5 : 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, color: colors.navy }}>
@@ -653,7 +671,11 @@ function EmployerInterviewsView() {
 
             {!unlocked && (
               <Box sx={{ bgcolor: '#FDEAEA', color: '#B3261E', fontSize: 13, borderRadius: 2, p: 1.5, mb: 1.5 }}>
-                * ต้องนัดสัมภาษณ์ผู้สมัครก่อน จึงจะเปิดใช้งานได้
+                {selectedInterview
+                  ? selectedInterview.result === 'failed'
+                    ? '* ผู้สมัครคนนี้ไม่ผ่านการสัมภาษณ์ จึงไม่สามารถจัดทำข้อตกลงการจ้างงานได้'
+                    : '* ต้องแจ้งผลการสัมภาษณ์เป็น "ผ่าน" ก่อน จึงจะเปิดใช้งานได้'
+                  : '* ต้องนัดสัมภาษณ์และแจ้งผลว่า "ผ่าน" ก่อน จึงจะเปิดใช้งานได้'}
               </Box>
             )}
             {unlocked && (

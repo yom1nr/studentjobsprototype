@@ -21,7 +21,6 @@ type UpdateUserRequest struct {
 	Password        string `json:"password" validate:"omitempty,min=8,max=72"`
 	Phone           string `json:"phone" validate:"omitempty,max=20"`
 	Gender          string `json:"gender" validate:"omitempty,max=20"`
-	Avatar          string `json:"avatar" validate:"omitempty"`
 	// Role is intentionally NOT editable here — a user must not be able to
 	// change their own role via self-service profile update.
 }

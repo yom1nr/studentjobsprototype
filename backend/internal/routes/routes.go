@@ -22,6 +22,7 @@ func SetupRouter(
     timeRecordHandler *controllers.TimeRecordController,
     payrollHandler *controllers.PayrollController,
     complaintHandler *controllers.ComplaintController,
+    uploadHandler *controllers.UploadController,
 ) *gin.Engine {
     router := gin.New()
     // Recovery must be registered here (before any routes) so it actually wraps
@@ -34,6 +35,9 @@ func SetupRouter(
     auth := api.Group("/auth")
     auth.POST("/register", authHandler.Register)
     auth.POST("/login", authHandler.Login)
+
+    // File upload — any authenticated user (profile images, employer docs, evidence)
+    api.POST("/upload", middleware.JWTAuthMiddleware(), uploadHandler.UploadFile)
 
     // Private Routes
     users := api.Group("/users")
@@ -54,6 +58,7 @@ func SetupRouter(
     employer.POST("/jobposts", jobpostHandler.CreateJobpost)
     employer.PUT("/jobposts/:id", jobpostHandler.UpdateJobpost)
     employer.POST("/jobposts/:id/close", jobpostHandler.CloseJobpost)
+    employer.DELETE("/jobposts/:id", jobpostHandler.DeleteJobpost)
 
     // Job posts — public browsing (no login required; only applying needs an account)
     jobposts := api.Group("/jobposts")
@@ -68,11 +73,13 @@ func SetupRouter(
     student.POST("/schedule/extract", studentHandler.ExtractScheduleFromImage)
     student.GET("/applications", applicationHandler.ListMyApplications)
     student.POST("/applications", applicationHandler.CreateApplication)
+    student.PUT("/applications/:id", applicationHandler.UpdateMyApplication)
 
     // Employer reviewing applications to their own job posts
     employer.GET("/applications", applicationHandler.ListEmployerApplications)
     employer.GET("/applications/:id", applicationHandler.GetEmployerApplicationDetail)
     employer.POST("/applications/:id/review", applicationHandler.ReviewApplication)
+    employer.DELETE("/applications/:id", applicationHandler.DeleteApplication)
 
     // Employer: interview scheduling (B6733827 subsystem 1)
     employer.POST("/interviews", interviewHandler.CreateInterview)
@@ -115,6 +122,7 @@ func SetupRouter(
     // Employer: payroll calculation + payment (B6729875 subsystem 2)
     employer.POST("/payrolls", payrollHandler.CreatePayroll)
     employer.POST("/payrolls/:id/approve", payrollHandler.ApprovePayroll)
+    employer.GET("/payrolls/summary", payrollHandler.MonthlySummary)
 
     // Student: confirm payment receipt
     student.POST("/payrolls/:id/confirm", payrollHandler.ConfirmReceipt)
@@ -139,6 +147,13 @@ func SetupRouter(
     admin.GET("/employers/:id", adminHandler.GetEmployerDetail)
     admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)
     admin.POST("/employers/:id/reject", adminHandler.RejectEmployer)
+    admin.POST("/employers/:id/request-document", adminHandler.RequestDocuments)
+    // Employer / student directory (browse + edit any account) and the audit trail
+    admin.GET("/employer-directory", adminHandler.ListAllEmployers)
+    admin.PUT("/employer-directory/:id", adminHandler.UpdateEmployer)
+    admin.GET("/student-directory", adminHandler.ListAllStudents)
+    admin.PUT("/student-directory/:id", adminHandler.UpdateStudent)
+    admin.GET("/audit-logs", adminHandler.ListAuditLogs)
     admin.GET("/complaints", complaintHandler.ListAll)
     admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
 

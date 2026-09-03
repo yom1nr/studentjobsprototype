@@ -1,4 +1,11 @@
-import type { AdminApplication, Application, CreateApplicationRequest, ReviewApplicationRequest, VerifyApplicationRequest } from '../../interface/IJobInterface'
+import type {
+  AdminApplication,
+  Application,
+  CreateApplicationRequest,
+  ReviewApplicationRequest,
+  UpdateApplicationRequest,
+  VerifyApplicationRequest,
+} from '../../interface/IJobInterface'
 import { apiFetch } from './index'
 
 export function createApplication(token: string, payload: CreateApplicationRequest): Promise<Application> {
@@ -7,6 +14,10 @@ export function createApplication(token: string, payload: CreateApplicationReque
 
 export function listMyApplications(token: string): Promise<Application[]> {
   return apiFetch<Application[]>('/api/v1/student/applications', { token })
+}
+
+export function updateMyApplication(token: string, id: number, payload: UpdateApplicationRequest): Promise<Application> {
+  return apiFetch<Application>(`/api/v1/student/applications/${id}`, { method: 'PUT', token, body: payload })
 }
 
 export function listEmployerApplications(token: string): Promise<Application[]> {
@@ -19,6 +30,10 @@ export function getEmployerApplicationDetail(token: string, id: number): Promise
 
 export function reviewApplication(token: string, id: number, payload: ReviewApplicationRequest): Promise<Application> {
   return apiFetch<Application>(`/api/v1/employer/applications/${id}/review`, { method: 'POST', token, body: payload })
+}
+
+export function deleteApplication(token: string, id: number): Promise<{ deleted: boolean; interviews_removed: number }> {
+  return apiFetch<{ deleted: boolean; interviews_removed: number }>(`/api/v1/employer/applications/${id}`, { method: 'DELETE', token })
 }
 
 export function listAdminApplications(token: string): Promise<AdminApplication[]> {

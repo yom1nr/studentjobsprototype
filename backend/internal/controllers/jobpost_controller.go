@@ -194,6 +194,77 @@ func (h *JobpostController) CloseJobpost(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, employer.CompanyName))
 }
 
+// DeleteJobpost removes a job posting owned by the current employer along with
+// everything that hangs off it — the applications sent to it, their audit trail,
+// and any interviews booked for those applications.
+//
+// Closing a post keeps it in the records; deleting is for clearing out posts that
+// should never have been there. A post that already led to a hire is refused, so
+// an employment agreement can never be left pointing at a vanished position.
+func (h *JobpostController) DeleteJobpost(c *gin.Context) {
+    employer, ok := h.currentEmployer(c)
+    if !ok {
+        return
+    }
+
+    jobpost, ok := h.ownedJobpost(c, employer.UserID)
+    if !ok {
+        return
+    }
+
+    var applicationIDs []uint
+    h.db.Model(&models.Application{}).Where("jobpost_id = ?", jobpost.JobpostID).Pluck("application_id", &applicationIDs)
+
+    var interviewIDs []uint
+    if len(applicationIDs) > 0 {
+        h.db.Model(&models.InterviewSchedule{}).Where("application_id IN ?", applicationIDs).Pluck("interview_id", &interviewIDs)
+    }
+
+    if len(interviewIDs) > 0 {
+        var hires int64
+        if err := h.db.Model(&models.EmploymentAgreement{}).Where("interview_schedule_id IN ?", interviewIDs).Count(&hires).Error; err != nil {
+            utils.JSONError(c, http.StatusBadRequest, "delete failed", err.Error())
+            return
+        }
+        if hires > 0 {
+            utils.JSONError(c, http.StatusBadRequest, "delete failed", "this job post already led to an employment agreement — close it instead of deleting")
+            return
+        }
+    }
+
+    if err := h.db.Transaction(func(tx *gorm.DB) error {
+        if len(interviewIDs) > 0 {
+            if err := tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.Notification{}).Error; err != nil {
+                return err
+            }
+            if err := tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.RescheduleInterview{}).Error; err != nil {
+                return err
+            }
+            if err := tx.Where("interview_id IN ?", interviewIDs).Delete(&models.InterviewSchedule{}).Error; err != nil {
+                return err
+            }
+        }
+        if len(applicationIDs) > 0 {
+            if err := tx.Where("application_id IN ?", applicationIDs).Delete(&models.ApplicationAudit{}).Error; err != nil {
+                return err
+            }
+            if err := tx.Where("application_id IN ?", applicationIDs).Delete(&models.Application{}).Error; err != nil {
+                return err
+            }
+        }
+        return tx.Delete(&models.Jobpost{}, jobpost.JobpostID).Error
+    }); err != nil {
+        utils.JSONInternalError(c, "delete failed", err)
+        return
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, gin.H{
+        "deleted":              true,
+        "applications_removed": len(applicationIDs),
+        "interviews_removed":   len(interviewIDs),
+    })
+}
+
 func (h *JobpostController) currentEmployer(c *gin.Context) (*models.Employer, bool) {
     userID, ok := utils.GetUserIDFromContext(c)
     if !ok {
@@ -247,12 +318,10 @@ func (h *JobpostController) findByID(id uint) (*models.Jobpost, error) {
 }
 
 func (h *JobpostController) mapWithCompanyName(jobpost *models.Jobpost) dto.JobpostResponse {
-    companyName := jobpost.CompanyName
-    if companyName == "" {
-        var employer models.Employer
-        if err := h.db.Select("company_name").First(&employer, jobpost.UserID).Error; err == nil {
-            companyName = employer.CompanyName
-        }
+    var employer models.Employer
+    companyName := ""
+    if err := h.db.Select("company_name").First(&employer, jobpost.UserID).Error; err == nil {
+        companyName = employer.CompanyName
     }
     return mapJobpostToResponse(jobpost, companyName)
 }

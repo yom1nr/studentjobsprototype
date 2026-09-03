@@ -88,6 +88,19 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     }
   }, [token, logout])
 
+  // Keep every open tab in sync with whichever session is currently logged in —
+  // otherwise a login/logout in one tab leaves other tabs showing a stale
+  // role's menu while actually calling the API with the new tab's token.
+  useEffect(() => {
+    function handleStorageChange(e: StorageEvent) {
+      if (e.key !== TOKEN_STORAGE_KEY) return
+      setToken(e.newValue)
+      if (!e.newValue) setUser(null)
+    }
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
+  }, [])
+
   const value = useMemo<AuthContextValue>(
     () => ({
       token,

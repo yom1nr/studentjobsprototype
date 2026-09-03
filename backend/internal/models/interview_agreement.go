@@ -7,9 +7,15 @@ import "time"
 // EmploymentAgreement.Status above) — it stores the onsite address or the
 // online meeting link shown in the "สถานที่ / ลิงก์สัมภาษณ์" design field.
 type InterviewSchedule struct {
-	InterviewID        uint       `gorm:"primaryKey" json:"interview_id"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	InterviewID uint      `gorm:"primaryKey" json:"interview_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	// ApplicationID ties the appointment to the specific application it is for.
+	// A student may hold several accepted applications with the same employer
+	// (one per position), and each needs its own interview — keyed only by
+	// student, one appointment would mark every one of their applications as
+	// already scheduled. Nullable so rows created before this existed still load.
+	ApplicationID      *uint      `gorm:"index" json:"application_id"`
 	StudentID          uint       `gorm:"not null;index" json:"student_id"`
 	EmployerID         uint       `gorm:"not null;index" json:"employer_id"`
 	InterviewFormat    string     `gorm:"size:100" json:"interview_format"` // online | onsite

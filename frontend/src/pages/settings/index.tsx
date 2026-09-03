@@ -386,6 +386,10 @@ function EmployerSettingsView() {
       setPasswordError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
       return
     }
+    if (!/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setPasswordError('รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข')
+      return
+    }
     if (newPassword !== confirmPassword) {
       setPasswordError('รหัสผ่านไม่ตรงกัน')
       return

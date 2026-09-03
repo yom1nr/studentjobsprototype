@@ -30,6 +30,9 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
+import FavoriteIcon from '@mui/icons-material/Favorite'
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder'
+import MyLocationOutlinedIcon from '@mui/icons-material/MyLocationOutlined'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
@@ -316,9 +319,39 @@ function JobDetailDialog({
 
 function StudentJobSearchView() {
   usePageTitle('ค้นหางานพาร์ทไทม์')
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const routerLocation = useLocation()
   const navigate = useNavigate()
+
+  // Favourite ("งานที่สนใจ") jobs live in localStorage, keyed per user — no backend.
+  const favStorageKey = user?.id ? `favorite_jobs_${user.id}` : 'favorite_jobs_guest'
+  const [favVersion, setFavVersion] = useState(0)
+  const favoriteJobIds = useMemo<number[]>(() => {
+    try {
+      const s = localStorage.getItem(favStorageKey)
+      return s ? (JSON.parse(s) as number[]) : []
+    } catch {
+      return []
+    }
+    // favVersion is a deliberate cache-bust: bumped on every toggle to re-read localStorage
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favStorageKey, favVersion])
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false)
+  function toggleFavorite(e: React.MouseEvent, jobId: number) {
+    e.stopPropagation()
+    const next = favoriteJobIds.includes(jobId) ? favoriteJobIds.filter((id) => id !== jobId) : [...favoriteJobIds, jobId]
+    try {
+      localStorage.setItem(favStorageKey, JSON.stringify(next))
+    } catch {
+      /* private mode / storage disabled — favourites just won't persist */
+    }
+    setFavVersion((v) => v + 1)
+  }
+
+  // "ค้นหางานใกล้ฉัน": on -> filter to a default 5km radius (unless the ตัวกรอง
+  // dialog set an explicit one) and sort nearest-first.
+  const [gpsEnabled, setGpsEnabled] = useState(false)
+  const [gpsBusy, setGpsBusy] = useState(false)
 
   const [jobs, setJobs] = useState<Jobpost[]>([])
   const [loading, setLoading] = useState(true)
@@ -343,6 +376,33 @@ function StudentJobSearchView() {
       { timeout: 8000 },
     )
   }, [])
+
+  function toggleNearMe() {
+    if (gpsEnabled) {
+      setGpsEnabled(false)
+      return
+    }
+    if (userCoords) {
+      setGpsEnabled(true)
+      return
+    }
+    setGpsBusy(true)
+    const done = (coords: { lat: number; lng: number }, denied = false) => {
+      setUserCoords(coords)
+      if (denied) setGeoDenied(true)
+      setGpsEnabled(true)
+      setGpsBusy(false)
+    }
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => done({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => done(SUT_CENTER, true),
+        { timeout: 8000 },
+      )
+    } else {
+      done(SUT_CENTER, true)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -372,9 +432,15 @@ function StudentJobSearchView() {
     const minWage = Number(filters.minWage) || 0
     const maxWage = Number(filters.maxWage) || Number.POSITIVE_INFINITY
 
-    const maxDist = filters.maxDistanceKm === 'ไม่จำกัด' ? Infinity : Number(filters.maxDistanceKm)
+    const maxDist =
+      filters.maxDistanceKm !== 'ไม่จำกัด'
+        ? Number(filters.maxDistanceKm)
+        : gpsEnabled
+          ? 5
+          : Infinity
 
-    return jobs.filter((job) => {
+    const list = jobs.filter((job) => {
+      if (showOnlyFavorites && !favoriteJobIds.includes(job.id)) return false
       if (q && !job.position.toLowerCase().includes(q) && !job.company_name.toLowerCase().includes(q)) return false
       if (filters.jobType !== 'ทั้งหมด' && job.job_type !== filters.jobType) return false
       if (filters.location !== 'ทั้งหมด' && job.location !== filters.location) return false
@@ -383,7 +449,14 @@ function StudentJobSearchView() {
       if (maxDist !== Infinity && userCoords && distanceKm(userCoords, jobCoords(job.location)) > maxDist) return false
       return true
     })
-  }, [jobs, query, filters, userCoords])
+
+    if (gpsEnabled && userCoords) {
+      return [...list].sort(
+        (a, b) => distanceKm(userCoords, jobCoords(a.location)) - distanceKm(userCoords, jobCoords(b.location)),
+      )
+    }
+    return list
+  }, [jobs, query, filters, userCoords, gpsEnabled, showOnlyFavorites, favoriteJobIds])
 
   function jobDistanceLabel(job: Jobpost): string | null {
     if (!userCoords) return null
@@ -413,15 +486,49 @@ function StudentJobSearchView() {
     <Box sx={{ maxWidth: 950, mx: 'auto' }}>
       <ErrorAlert message={error} />
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 4 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 4 }}>
         <TextField
           placeholder="พนักงานเสิร์ฟ"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          fullWidth
-          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '20px', bgcolor: 'rgba(158, 158, 158, 0.1)' } }}
+          sx={{ flex: '1 1 260px', '& .MuiOutlinedInput-root': { borderRadius: '20px', bgcolor: 'rgba(158, 158, 158, 0.1)' } }}
           slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchOutlinedIcon /></InputAdornment> } }}
         />
+        <Button
+          variant={showOnlyFavorites ? 'contained' : 'outlined'}
+          startIcon={showOnlyFavorites ? <FavoriteIcon /> : <FavoriteBorderIcon />}
+          onClick={() => setShowOnlyFavorites((v) => !v)}
+          sx={{
+            borderRadius: '20px',
+            textTransform: 'none',
+            flexShrink: 0,
+            px: 2.5,
+            bgcolor: showOnlyFavorites ? '#E53935' : 'transparent',
+            color: showOnlyFavorites ? '#fff' : '#E53935',
+            borderColor: '#E53935',
+            '&:hover': { bgcolor: showOnlyFavorites ? '#C62828' : 'rgba(229,57,53,0.08)', borderColor: '#E53935' },
+          }}
+        >
+          งานที่สนใจ ({favoriteJobIds.length})
+        </Button>
+        <Button
+          variant={gpsEnabled ? 'contained' : 'outlined'}
+          startIcon={<MyLocationOutlinedIcon />}
+          onClick={toggleNearMe}
+          disabled={gpsBusy}
+          sx={{
+            borderRadius: '20px',
+            textTransform: 'none',
+            flexShrink: 0,
+            px: 2.5,
+            bgcolor: gpsEnabled ? '#0088FF' : 'transparent',
+            color: gpsEnabled ? '#fff' : colors.navy,
+            borderColor: '#C4C4C4',
+            '&:hover': { bgcolor: gpsEnabled ? '#0070D6' : 'rgba(0,0,0,0.04)' },
+          }}
+        >
+          {gpsBusy ? 'กำลังดึงพิกัด…' : gpsEnabled ? 'ค้นหางานใกล้ฉัน (เปิด)' : 'ค้นหางานใกล้ฉัน'}
+        </Button>
         <Button
           variant="outlined"
           startIcon={<TuneOutlinedIcon />}
@@ -443,9 +550,9 @@ function StudentJobSearchView() {
           ? 'แนะนำสำหรับคุณ'
           : <>ผลการค้นหา <Box component="span" sx={{ fontWeight: 400, fontSize: 16 }}>{filteredJobs.length} รายการ</Box></>}
       </Typography>
-      {geoDenied && filters.maxDistanceKm !== 'ไม่จำกัด' && (
+      {geoDenied && (gpsEnabled || filters.maxDistanceKm !== 'ไม่จำกัด') && (
         <Typography sx={{ fontSize: 12, color: '#B5850C', mb: 1 }}>
-          ไม่สามารถเข้าถึงตำแหน่งของคุณได้ — ตัวกรองระยะทางถูกปิดใช้งาน
+          ไม่สามารถเข้าถึงตำแหน่งของคุณได้ — ใช้พิกัดกลางมหาวิทยาลัยแทน
         </Typography>
       )}
 
@@ -482,8 +589,16 @@ function StudentJobSearchView() {
                 )}
                 <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.wage} บาท/ชั่วโมง</Typography>
               </Box>
-              <Box sx={{ display: 'flex', gap: 1, alignSelf: 'flex-start' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, alignSelf: 'flex-start' }}>
                 {job.job_type && <Chip label={job.job_type} size="small" sx={{ bgcolor: colors.tagBg, color: colors.navy, borderRadius: '5px', fontSize: 13 }} />}
+                <IconButton
+                  size="small"
+                  aria-label="บันทึกงานที่สนใจ"
+                  onClick={(e) => toggleFavorite(e, job.id)}
+                  sx={{ color: favoriteJobIds.includes(job.id) ? '#E53935' : '#9E9E9E' }}
+                >
+                  {favoriteJobIds.includes(job.id) ? <FavoriteIcon fontSize="small" /> : <FavoriteBorderIcon fontSize="small" />}
+                </IconButton>
               </Box>
             </Box>
           ))}

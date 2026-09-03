@@ -118,6 +118,9 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
     if payload.Gender != "" {
         user.Gender = payload.Gender
     }
+    if payload.Avatar != "" {
+        user.Avatar = payload.Avatar
+    }
 
     user.UpdatedAt = time.Now().UTC()
     if err := h.db.Save(user).Error; err != nil {

@@ -38,6 +38,7 @@ import studentLogo from '../assets/student-logo.svg'
 import { PageTitleProvider } from './PageTitleProvider'
 import { useHeaderTitle } from './usePageTitle'
 import { getUnreadNotificationCount } from '../services/https/notifications'
+import { getApiBaseUrl } from '../services/https'
 
 const SIDEBAR_WIDTH = 300
 
@@ -355,6 +356,7 @@ function AppShellInner() {
             }}
           >
             <Avatar
+              src={user?.avatar ? `${getApiBaseUrl()}${user.avatar}` : undefined}
               sx={{
                 width: 34,
                 height: 34,

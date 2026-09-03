@@ -17,5 +17,6 @@ export type UpdateProfileRequest = {
   password?: string
   phone?: string
   gender?: string
+  avatar?: string
   role?: string
 }

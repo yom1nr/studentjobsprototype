@@ -402,6 +402,143 @@ function ChangePasswordCard({ onChanged }: Readonly<{ onChanged?: () => void }>)
   )
 }
 
+// Shared "จัดการบัญชี" card — avatar upload + editable user_name/email +
+// ChangePasswordCard. Used by both the employer and student settings views.
+function AccountPanel({ onSaved }: Readonly<{ onSaved?: () => void }>) {
+  const { user, token, updateProfile } = useAuth()
+  const [editing, setEditing] = useState(false)
+  const [userName, setUserName] = useState(user?.user_name ?? '')
+  const [email, setEmail] = useState(user?.email ?? '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+
+  function startEdit() {
+    setUserName(user?.user_name ?? '')
+    setEmail(user?.email ?? '')
+    setErr(null)
+    setEditing(true)
+  }
+
+  async function save() {
+    setErr(null)
+    if (userName.trim().length < 2) {
+      setErr('ชื่อผู้ใช้ต้องมีอย่างน้อย 2 ตัวอักษร')
+      return
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setErr('อีเมลไม่ถูกต้อง')
+      return
+    }
+    setSaving(true)
+    try {
+      await updateProfile({ user_name: userName.trim(), email: email.trim() })
+      setEditing(false)
+      onSaved?.()
+    } catch (e) {
+      setErr(e instanceof ApiError ? (e.detail ? `${e.message}: ${e.detail}` : e.message) : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function pickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !token) return
+    setAvatarBusy(true)
+    setErr(null)
+    try {
+      const url = await uploadFile(token, file)
+      await updateProfile({ avatar: url })
+      onSaved?.()
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : 'อัปโหลดรูปไม่สำเร็จ')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
+  const avatarSrc = user?.avatar ? `${getApiBaseUrl()}${user.avatar}` : undefined
+
+  return (
+    <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
+      <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>จัดการบัญชี</Typography>
+      <ErrorAlert message={err} />
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+        <Box component="label" sx={{ position: 'relative', cursor: avatarBusy ? 'default' : 'pointer', flexShrink: 0 }}>
+          {avatarSrc ? (
+            <Box
+              component="img"
+              src={avatarSrc}
+              alt=""
+              sx={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: `1px solid ${colors.border}`, display: 'block' }}
+            />
+          ) : (
+            <Box sx={{ width: 72, height: 72, borderRadius: '50%', bgcolor: colors.field, display: 'grid', placeItems: 'center' }}>
+              <PersonIcon sx={{ fontSize: 40, color: '#9AA0A6' }} />
+            </Box>
+          )}
+          {avatarBusy && <CircularProgress size={22} sx={{ position: 'absolute', top: 25, left: 25 }} />}
+          <input type="file" hidden accept=".jpg,.jpeg,.png,.webp" disabled={avatarBusy} onChange={(e) => void pickAvatar(e)} />
+        </Box>
+        <Box>
+          <Typography sx={{ fontWeight: 600, fontSize: 14, color: colors.navy }}>รูปโปรไฟล์</Typography>
+          <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>คลิกที่รูปเพื่อเปลี่ยน · JPG / PNG / WebP ไม่เกิน 5MB</Typography>
+        </Box>
+      </Box>
+
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 380 }}>
+        <TextField
+          label="ชื่อผู้ใช้"
+          size="small"
+          value={editing ? userName : user?.user_name ?? ''}
+          onChange={(e) => setUserName(e.target.value)}
+          disabled={!editing}
+          fullWidth
+          sx={{ bgcolor: colors.field, borderRadius: 1 }}
+        />
+        <TextField
+          label="อีเมล"
+          size="small"
+          value={editing ? email : user?.email ?? ''}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={!editing}
+          fullWidth
+          sx={{ bgcolor: colors.field, borderRadius: 1 }}
+        />
+        {editing ? (
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              onClick={() => void save()}
+              disabled={saving}
+              sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+            >
+              {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+            </Button>
+            <Button
+              onClick={() => setEditing(false)}
+              sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+            >
+              ยกเลิก
+            </Button>
+          </Box>
+        ) : (
+          <Button
+            startIcon={<EditOutlinedIcon />}
+            onClick={startEdit}
+            sx={{ alignSelf: 'flex-start', bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
+          >
+            แก้ไขชื่อผู้ใช้ / อีเมล
+          </Button>
+        )}
+        <ChangePasswordCard onChanged={onSaved} />
+      </Box>
+    </Box>
+  )
+}
+
 function EmployerSettingsView() {
   usePageTitle('ข้อมูลส่วนตัวผู้ประกอบการ')
   const { user, token, updateProfile } = useAuth()
@@ -422,7 +559,6 @@ function EmployerSettingsView() {
 
   const [activeTab, setActiveTab] = useState<EmployerTabKey>('company')
   const [documents, setDocuments] = useState(INITIAL_COMPANY_DOCUMENTS)
-  const [avatarName, setAvatarName] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -733,58 +869,7 @@ function EmployerSettingsView() {
             </Box>
           )}
 
-          {activeTab === 'account' && (
-            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 4 }}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                <Box
-                  sx={{
-                    width: 140,
-                    height: 140,
-                    borderRadius: '50%',
-                    bgcolor: colors.field,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <PersonIcon sx={{ fontSize: 72, color: '#9AA0A6' }} />
-                </Box>
-                <Box
-                  component="label"
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    border: `1.5px solid ${colors.border}`,
-                    borderRadius: 3,
-                    p: 1.5,
-                    cursor: 'pointer',
-                    width: 260,
-                  }}
-                >
-                  <input
-                    type="file"
-                    hidden
-                    accept=".jpg,.jpeg,.png"
-                    onChange={(e) => setAvatarName(e.target.files?.[0]?.name ?? null)}
-                  />
-                  <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: 13, color: colors.navy }}>รูปโปรไฟล์</Typography>
-                    <Typography sx={{ fontSize: 11, color: '#9AA0A6' }} noWrap>
-                      {avatarName ?? 'รองรับไฟล์ JPG, PNG (ขนาดไม่เกิน 5MB)'}
-                    </Typography>
-                  </Box>
-                </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1, maxWidth: 380 }}>
-                <TextField label="ชื่อผู้ใช้" size="small" value={user.user_name} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-                <TextField label="อีเมล" size="small" value={user.email} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-                <ChangePasswordCard onChanged={() => setSavedNotice(true)} />
-              </Box>
-            </Box>
-          )}
+          {activeTab === 'account' && <AccountPanel onSaved={() => setSavedNotice(true)} />}
         </Box>
       </Box>
 
@@ -1099,14 +1184,7 @@ function StudentSettingsView() {
         )}
       </Box>
 
-      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
-        <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>จัดการบัญชี</Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 380 }}>
-          <TextField label="ชื่อผู้ใช้" size="small" value={user.user_name} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-          <TextField label="อีเมล" size="small" value={user.email} disabled fullWidth sx={{ bgcolor: colors.field, borderRadius: 1 }} />
-          <ChangePasswordCard onChanged={() => setSavedNotice(true)} />
-        </Box>
-      </Box>
+      <AccountPanel onSaved={() => setSavedNotice(true)} />
 
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>

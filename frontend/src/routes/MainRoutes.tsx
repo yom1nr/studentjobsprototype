@@ -76,17 +76,22 @@ export function MainRoutes() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<FullLayout />}>
+            {/* Any authenticated role */}
             <Route path="/profile" element={<DashboardPage />} />
-            <Route path="/time-tracking" element={<TimeTrackingPage />} />
-            <Route path="/my-jobs" element={<MyJobsPage />} />
-            <Route path="/applications" element={<ApplicationsPage />} />
-            <Route path="/interviews" element={<InterviewsPage />} />
-            <Route path="/employment" element={<EmploymentPage />} />
-            <Route path="/payroll" element={<PayrollPage />} />
             <Route path="/complaints" element={<ComplaintsPage />} />
             <Route path="/messages" element={<MessagesPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+
+            {/* Student + employer work area — admin is redirected out */}
+            <Route element={<RoleRoute allow={['student', 'employer']} />}>
+              <Route path="/time-tracking" element={<TimeTrackingPage />} />
+              <Route path="/my-jobs" element={<MyJobsPage />} />
+              <Route path="/applications" element={<ApplicationsPage />} />
+              <Route path="/interviews" element={<InterviewsPage />} />
+              <Route path="/employment" element={<EmploymentPage />} />
+              <Route path="/payroll" element={<PayrollPage />} />
+            </Route>
 
             <Route element={<RoleRoute allow={['admin']} />}>
               <Route path="/admin/employers" element={<AdminEmployerApprovalsPage />} />

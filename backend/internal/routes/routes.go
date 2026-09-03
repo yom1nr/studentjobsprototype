@@ -59,6 +59,7 @@ func SetupRouter(
     employer.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("employer"))
     employer.GET("/profile", employerHandler.GetMyProfile)
     employer.PUT("/profile", employerHandler.UpsertMyProfile)
+    employer.POST("/documents/acknowledge", employerHandler.AcknowledgeRequestNote)
     employer.GET("/jobposts", jobpostHandler.ListMyJobposts)
     employer.POST("/jobposts", approvedEmployer, jobpostHandler.CreateJobpost)
     employer.PUT("/jobposts/:id", approvedEmployer, jobpostHandler.UpdateJobpost)

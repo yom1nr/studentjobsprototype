@@ -79,6 +79,8 @@ export default function AdminEmployerApprovalsPage() {
   const [selected, setSelected] = useState<EmployerApproval | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [rejecting, setRejecting] = useState(false)
+  const [docNote, setDocNote] = useState('')
+  const [requestingDocs, setRequestingDocs] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [deciding, setDeciding] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
@@ -112,6 +114,8 @@ export default function AdminEmployerApprovalsPage() {
     setSelected(employer)
     setRejectReason('')
     setRejecting(false)
+    setDocNote('')
+    setRequestingDocs(false)
     setActionError(null)
   }
 
@@ -151,10 +155,14 @@ export default function AdminEmployerApprovalsPage() {
 
   async function handleRequestDocuments() {
     if (!token || !selected) return
+    if (docNote.trim().length === 0) {
+      setActionError('กรุณาระบุเอกสารหรือรายละเอียดที่ต้องการให้ผู้ประกอบการส่งเพิ่ม')
+      return
+    }
     setDeciding(true)
     setActionError(null)
     try {
-      await requestEmployerDocuments(token, selected.employer_id, rejectReason.trim() || undefined)
+      await requestEmployerDocuments(token, selected.employer_id, docNote.trim())
       setSelected(null)
       setReloadToken((t) => t + 1)
     } catch (err) {
@@ -272,6 +280,18 @@ export default function AdminEmployerApprovalsPage() {
               <DocLink label="โลโก้บริษัท" url={selected.logo} />
             </Box>
 
+            {selected.status === 'request_document' && selected.request_note && (
+              <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 2, p: 1.5, mb: 2, bgcolor: '#F5F9FF' }}>
+                <Typography sx={{ fontWeight: 700, fontSize: 14, color: colors.navy, mb: 0.5 }}>
+                  เอกสารที่ขอเพิ่มเติมล่าสุด{' '}
+                  <Typography component="span" sx={{ fontWeight: 400, fontSize: 12, color: selected.request_note_acknowledged ? '#217829' : '#B5850C' }}>
+                    {selected.request_note_acknowledged ? '· ผู้ประกอบการอ่านแล้ว' : '· ผู้ประกอบการยังไม่อ่าน'}
+                  </Typography>
+                </Typography>
+                <Typography sx={{ fontSize: 13, color: '#333', whiteSpace: 'pre-line' }}>{selected.request_note}</Typography>
+              </Box>
+            )}
+
             {inReview(selected.status) && (
               <>
                 {rejecting && (
@@ -279,6 +299,18 @@ export default function AdminEmployerApprovalsPage() {
                     label="เหตุผลการไม่อนุมัติ"
                     value={rejectReason}
                     onChange={(e) => setRejectReason(e.target.value)}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    sx={{ mb: 2 }}
+                  />
+                )}
+                {requestingDocs && (
+                  <TextField
+                    label="ระบุเอกสาร / รายละเอียดที่ต้องการให้ส่งเพิ่ม"
+                    placeholder="เช่น สำเนาบัตรประชาชนผู้มีอำนาจลงนาม, สำเนาทะเบียนบ้าน"
+                    value={docNote}
+                    onChange={(e) => setDocNote(e.target.value)}
                     fullWidth
                     multiline
                     minRows={2}
@@ -300,6 +332,20 @@ export default function AdminEmployerApprovalsPage() {
                         ยืนยันไม่อนุมัติ
                       </Button>
                     </>
+                  ) : requestingDocs ? (
+                    <>
+                      <Button onClick={() => setRequestingDocs(false)} sx={{ textTransform: 'none', color: colors.navy }}>
+                        ยกเลิก
+                      </Button>
+                      <Button
+                        variant="contained"
+                        onClick={() => void handleRequestDocuments()}
+                        disabled={deciding}
+                        sx={{ bgcolor: '#0066CC', textTransform: 'none', borderRadius: '20px', '&:hover': { bgcolor: '#0052A3' } }}
+                      >
+                        ส่งคำขอเอกสาร
+                      </Button>
+                    </>
                   ) : (
                     <>
                       <Button
@@ -309,8 +355,7 @@ export default function AdminEmployerApprovalsPage() {
                         ไม่อนุมัติ
                       </Button>
                       <Button
-                        onClick={() => void handleRequestDocuments()}
-                        disabled={deciding}
+                        onClick={() => setRequestingDocs(true)}
                         sx={{ bgcolor: '#E5F2FF', color: '#0066CC', textTransform: 'none', borderRadius: '20px', px: 2.5 }}
                       >
                         ขอเอกสารเพิ่มเติม

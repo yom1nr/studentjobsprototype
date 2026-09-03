@@ -12,3 +12,7 @@ export function upsertMyEmployerProfile(token: string, payload: UpsertEmployerPr
     body: payload,
   })
 }
+
+export function acknowledgeRequestNote(token: string): Promise<{ request_note_acknowledged: boolean }> {
+  return apiFetch('/api/v1/employer/documents/acknowledge', { method: 'POST', token })
+}

@@ -16,6 +16,9 @@ export type EmployerApproval = {
   card_id: string
   status: string // pending | request_document | approved | rejected
   date_of_sign_up: string
+  /** The note the admin last sent asking for more documents, '' if none. */
+  request_note: string
+  request_note_acknowledged: boolean
 }
 
 export type RejectEmployerRequest = {

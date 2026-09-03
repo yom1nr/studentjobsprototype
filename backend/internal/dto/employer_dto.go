@@ -34,6 +34,10 @@ type EmployerProfileResponse struct {
     Logo           string `json:"logo"`
     CardID         string `json:"card_id"`
     ApproveStatus  string `json:"approve_status"`
-    CreatedAt      string `json:"created_at"`
-    UpdatedAt      string `json:"updated_at"`
+    // When approve_status = "request_document": what the admin asked for, and
+    // whether this employer has marked it read.
+    RequestNote             string `json:"request_note"`
+    RequestNoteAcknowledged bool   `json:"request_note_acknowledged"`
+    CreatedAt               string `json:"created_at"`
+    UpdatedAt               string `json:"updated_at"`
 }

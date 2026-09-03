@@ -20,6 +20,10 @@ type EmployerApprovalResponse struct {
     CardID       string `json:"card_id"`
     Status       string `json:"status"` // pending | request_document | approved | rejected
     DateOfSignUp string `json:"date_of_sign_up"`
+    // The note the admin last sent when asking for more documents, and whether
+    // the employer has marked it as read.
+    RequestNote             string `json:"request_note"`
+    RequestNoteAcknowledged bool   `json:"request_note_acknowledged"`
 }
 
 // RequestDocumentsRequest is the optional note an admin sends when asking an

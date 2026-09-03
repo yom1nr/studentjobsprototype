@@ -46,6 +46,32 @@ func (h *EmployerController) GetMyProfile(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapEmployerToResponse(employer))
 }
 
+// AcknowledgeRequestNote marks the admin's "request more documents" note as read
+// by the current employer. No-op unless the account is in "request_document".
+func (h *EmployerController) AcknowledgeRequestNote(c *gin.Context) {
+    userID, ok := utils.GetUserIDFromContext(c)
+    if !ok {
+        utils.JSONError(c, http.StatusUnauthorized, "authorization required", "user id missing from token")
+        return
+    }
+
+    var approve models.Approve
+    if err := h.db.Where("user_id = ?", userID).First(&approve).Error; err != nil {
+        utils.JSONError(c, http.StatusNotFound, "approval record not found", "submit your company profile first")
+        return
+    }
+    if approve.Status == "request_document" && approve.RequestNoteAckAt == nil {
+        now := time.Now().UTC()
+        approve.RequestNoteAckAt = &now
+        if err := h.db.Save(&approve).Error; err != nil {
+            utils.JSONInternalError(c, "could not save acknowledgement", err)
+            return
+        }
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, gin.H{"request_note_acknowledged": approve.RequestNoteAckAt != nil})
+}
+
 // UpsertMyProfile creates or updates the current employer's company profile.
 // The first submission also opens an Approve record with status "pending" for
 // admin review; later edits leave the existing approval status untouched.
@@ -162,8 +188,12 @@ func (h *EmployerController) findByUserID(userID uint) (*models.Employer, error)
 
 func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileResponse {
     status := ""
+    requestNote := ""
+    requestNoteAck := false
     if employer.Approve != nil {
         status = employer.Approve.Status
+        requestNote = employer.Approve.RequestNote
+        requestNoteAck = employer.Approve.RequestNoteAckAt != nil
     }
     companyRegis, logo, cardID := "", "", ""
     if employer.AttachmentEmployer != nil {
@@ -173,22 +203,24 @@ func mapEmployerToResponse(employer *models.Employer) *dto.EmployerProfileRespon
     }
 
     return &dto.EmployerProfileResponse{
-        ID:             employer.UserID,
-        UserID:         employer.UserID,
-        FirstName:      employer.FirstName,
-        LastName:       employer.LastName,
-        Position:       employer.Position,
-        LineID:         employer.LineID,
-        CompanyName:    employer.CompanyName,
-        BusinessType:   employer.BusinessType,
-        TaxID:          employer.TaxID,
-        Link:           employer.Link,
-        CompanyAddress: employer.CompanyAddress,
-        CompanyRegis:   companyRegis,
-        Logo:           logo,
-        CardID:         cardID,
-        ApproveStatus:  status,
-        CreatedAt:      employer.CreatedAt.Format(time.RFC3339),
-        UpdatedAt:      employer.UpdatedAt.Format(time.RFC3339),
+        ID:                      employer.UserID,
+        UserID:                  employer.UserID,
+        FirstName:               employer.FirstName,
+        LastName:                employer.LastName,
+        Position:                employer.Position,
+        LineID:                  employer.LineID,
+        CompanyName:             employer.CompanyName,
+        BusinessType:            employer.BusinessType,
+        TaxID:                   employer.TaxID,
+        Link:                    employer.Link,
+        CompanyAddress:          employer.CompanyAddress,
+        CompanyRegis:            companyRegis,
+        Logo:                    logo,
+        CardID:                  cardID,
+        ApproveStatus:           status,
+        RequestNote:             requestNote,
+        RequestNoteAcknowledged: requestNoteAck,
+        CreatedAt:               employer.CreatedAt.Format(time.RFC3339),
+        UpdatedAt:               employer.UpdatedAt.Format(time.RFC3339),
     }
 }

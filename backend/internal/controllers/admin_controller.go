@@ -204,6 +204,8 @@ func (h *AdminController) RequestDocuments(c *gin.Context) {
 
     employer.Approve.Status = "request_document"
     employer.Approve.AdminID = &admin.UserID
+    employer.Approve.RequestNote = payload.Note
+    employer.Approve.RequestNoteAckAt = nil
     if err := h.db.Save(employer.Approve).Error; err != nil {
         utils.JSONInternalError(c, "request failed", err)
         return
@@ -267,9 +269,13 @@ func notifyUser(db *gorm.DB, userID uint, title, notificationType, message strin
 func mapEmployerApprovalToResponse(user *models.User, employer *models.Employer) dto.EmployerApprovalResponse {
     status := ""
     dateOfSignUp := ""
+    requestNote := ""
+    requestNoteAck := false
     if employer.Approve != nil {
         status = employer.Approve.Status
         dateOfSignUp = employer.Approve.DateOfSignUp.Format(time.RFC3339)
+        requestNote = employer.Approve.RequestNote
+        requestNoteAck = employer.Approve.RequestNoteAckAt != nil
     }
 
     companyRegis, logo, cardID := "", "", ""
@@ -280,22 +286,24 @@ func mapEmployerApprovalToResponse(user *models.User, employer *models.Employer)
     }
 
     return dto.EmployerApprovalResponse{
-        EmployerID:     employer.UserID,
-        UserID:         user.UserID,
-        Email:          user.Email,
-        Phone:          user.Phone,
-        FirstName:      employer.FirstName,
-        LastName:       employer.LastName,
-        Position:       employer.Position,
-        CompanyName:    employer.CompanyName,
-        BusinessType:   employer.BusinessType,
-        TaxID:          employer.TaxID,
-        CompanyAddress: employer.CompanyAddress,
-        CompanyRegis:   companyRegis,
-        Logo:           logo,
-        CardID:         cardID,
-        Status:         status,
-        DateOfSignUp:   dateOfSignUp,
+        EmployerID:              employer.UserID,
+        UserID:                  user.UserID,
+        Email:                   user.Email,
+        Phone:                   user.Phone,
+        FirstName:               employer.FirstName,
+        LastName:                employer.LastName,
+        Position:                employer.Position,
+        CompanyName:             employer.CompanyName,
+        BusinessType:            employer.BusinessType,
+        TaxID:                   employer.TaxID,
+        CompanyAddress:          employer.CompanyAddress,
+        CompanyRegis:            companyRegis,
+        Logo:                    logo,
+        CardID:                  cardID,
+        Status:                  status,
+        DateOfSignUp:            dateOfSignUp,
+        RequestNote:             requestNote,
+        RequestNoteAcknowledged: requestNoteAck,
     }
 }
 

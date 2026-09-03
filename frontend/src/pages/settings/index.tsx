@@ -17,7 +17,7 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
 import { ApiError, getApiBaseUrl } from '../../services/https'
 import { uploadFile } from '../../services/https/upload'
-import { getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/https/employer'
+import { acknowledgeRequestNote, getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/https/employer'
 import type { EmployerProfile as EmployerProfileApi } from '../../interface/IEmployerInterface'
 import { extractScheduleFromImage, getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
 import type { StudentProfile as StudentProfileApi } from '../../interface/IStudentInterface'
@@ -410,6 +410,9 @@ function EmployerSettingsView() {
     apiToLocalProfile(null, { email: user?.email ?? '', phone: user?.phone ?? '' }),
   )
   const [approveStatus, setApproveStatus] = useState('')
+  const [requestNote, setRequestNote] = useState('')
+  const [requestNoteAck, setRequestNoteAck] = useState(false)
+  const [ackBusy, setAckBusy] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(EMPTY_EMPLOYER_PROFILE)
   const [loadingProfile, setLoadingProfile] = useState(true)
@@ -432,6 +435,8 @@ function EmployerSettingsView() {
         if (cancelled) return
         setProfile(apiToLocalProfile(api, { email: user?.email ?? '', phone: user?.phone ?? '' }))
         setApproveStatus(api.approve_status)
+        setRequestNote(api.request_note ?? '')
+        setRequestNoteAck(!!api.request_note_acknowledged)
         setDocuments((docs) =>
           docs.map((d) =>
             d.key === 'registration'
@@ -487,6 +492,8 @@ function EmployerSettingsView() {
       }
       setProfile(apiToLocalProfile(api, { email: user?.email ?? '', phone: draft.phone.trim() }))
       setApproveStatus(api.approve_status)
+        setRequestNote(api.request_note ?? '')
+        setRequestNoteAck(!!api.request_note_acknowledged)
       setEditing(false)
       setSavedNotice(true)
     } catch (err) {
@@ -528,11 +535,26 @@ function EmployerSettingsView() {
         logo: documents.find((d) => d.key === 'logo')?.url || undefined,
       })
       setApproveStatus(api.approve_status)
+        setRequestNote(api.request_note ?? '')
+        setRequestNoteAck(!!api.request_note_acknowledged)
       setSavedNotice(true)
     } catch (err) {
       setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกเอกสารไม่สำเร็จ')
     } finally {
       setSavingDocs(false)
+    }
+  }
+
+  async function acknowledgeNote() {
+    if (!token) return
+    setAckBusy(true)
+    try {
+      await acknowledgeRequestNote(token)
+      setRequestNoteAck(true)
+    } catch {
+      /* non-critical — the banner just keeps offering the button */
+    } finally {
+      setAckBusy(false)
     }
   }
 
@@ -543,24 +565,40 @@ function EmployerSettingsView() {
   const rows = activeTab === 'company' ? companyFieldRows : activeTab === 'contact' ? contactFieldRows : []
   const statusInfo = approveStatus ? APPROVE_STATUS_LABEL[approveStatus] : undefined
 
-  const approvalBanner: { severity: 'warning' | 'error' | 'info'; text: string } | null =
-    approveStatus === 'approved' || approveStatus === ''
-      ? null
-      : approveStatus === 'rejected'
-        ? { severity: 'error', text: 'บัญชีผู้ประกอบการของคุณไม่ได้รับการอนุมัติ จึงยังประกาศงาน สัมภาษณ์ หรือทำสัญญาจ้างไม่ได้ กรุณาติดต่อเจ้าหน้าที่' }
-        : approveStatus === 'request_document'
-          ? { severity: 'info', text: 'เจ้าหน้าที่ขอเอกสารเพิ่มเติม กรุณาแนบเอกสารในแท็บ "เอกสารบริษัท" แล้วบันทึก บัญชีจะกลับเข้าคิวตรวจสอบอีกครั้ง' }
-          : { severity: 'warning', text: 'บัญชีอยู่ระหว่างรอเจ้าหน้าที่อนุมัติ ระหว่างนี้ยังประกาศงานหรือใช้งานส่วนอื่นไม่ได้ — แก้ไขข้อมูล/เอกสารได้ตามปกติ' }
-
   return (
     <Box sx={{ maxWidth: 950, mx: 'auto' }}>
       <ErrorAlert message={error} />
 
-      {approvalBanner && (
-        <Alert severity={approvalBanner.severity} sx={{ mb: 2, borderRadius: 2 }}>
-          {approvalBanner.text}
+      {approveStatus === 'request_document' ? (
+        <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
+          <Typography sx={{ fontWeight: 600 }}>เจ้าหน้าที่ขอเอกสาร/ข้อมูลเพิ่มเติม</Typography>
+          {requestNote && (
+            <Typography sx={{ fontSize: 13, whiteSpace: 'pre-line', mt: 0.5, bgcolor: 'rgba(255,255,255,0.6)', p: 1, borderRadius: 1 }}>
+              {requestNote}
+            </Typography>
+          )}
+          <Typography sx={{ fontSize: 13, mt: 0.75 }}>
+            แนบเอกสารในแท็บ "เอกสารบริษัท" แล้วกดบันทึก บัญชีจะกลับเข้าคิวตรวจสอบอีกครั้ง
+          </Typography>
+          <Box sx={{ mt: 1 }}>
+            {requestNoteAck ? (
+              <Typography sx={{ fontSize: 13, color: '#217829', fontWeight: 600 }}>✓ รับทราบแล้ว</Typography>
+            ) : (
+              <Button size="small" variant="outlined" disabled={ackBusy} onClick={() => void acknowledgeNote()} sx={{ textTransform: 'none' }}>
+                {ackBusy ? 'กำลังบันทึก…' : 'รับทราบแล้ว'}
+              </Button>
+            )}
+          </Box>
         </Alert>
-      )}
+      ) : approveStatus === 'rejected' ? (
+        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
+          บัญชีผู้ประกอบการของคุณไม่ได้รับการอนุมัติ จึงยังประกาศงาน สัมภาษณ์ หรือทำสัญญาจ้างไม่ได้ กรุณาติดต่อเจ้าหน้าที่
+        </Alert>
+      ) : approveStatus === 'pending' ? (
+        <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
+          บัญชีอยู่ระหว่างรอเจ้าหน้าที่อนุมัติ ระหว่างนี้ยังประกาศงานหรือใช้งานส่วนอื่นไม่ได้ — แก้ไขข้อมูล/เอกสารได้ตามปกติ
+        </Alert>
+      ) : null}
 
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>

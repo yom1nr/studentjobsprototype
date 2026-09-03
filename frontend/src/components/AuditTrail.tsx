@@ -75,18 +75,22 @@ export function AuditTrail({
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
-    listAuditLogs(token, { target_type: targetType, target_id: targetId, limit: 50 })
-      .then((data) => {
+    // Loading/error are set inside load() rather than in the effect body: setting
+    // state straight from an effect triggers an extra render pass, which is what
+    // react-hooks/set-state-in-effect flags. Same shape as the other pages here.
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await listAuditLogs(token, { target_type: targetType, target_id: targetId, limit: 50 })
         if (!cancelled) setLogs(data)
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : 'ไม่สามารถโหลดประวัติการแก้ไขได้')
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false)
-      })
+      }
+    }
+    void load()
     return () => {
       cancelled = true
     }

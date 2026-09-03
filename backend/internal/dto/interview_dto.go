@@ -47,18 +47,39 @@ type InterviewResponse struct {
 // Reason doubles as the free-text note either side sends (e.g. the employer's
 // "please tell me your availability" question, or the student's own reason).
 type RequestRescheduleRequest struct {
-	Reason                   string `json:"reason" validate:"required"`
+	Reason string `json:"reason" validate:"required"`
+	// Student flow: the one slot the student is asking to move to. The employer
+	// then approves or rejects it.
 	StudentAvailableDateTime string `json:"student_available_date_time" validate:"omitempty"`
-	NewAppointmentDateTime   string `json:"new_appointment_date_time" validate:"omitempty"`
+	// Employer flow: the times being offered, RFC3339, for the student to choose
+	// from. Offering slots and approving a proposal are mutually exclusive, so a
+	// request carries one or the other, never both.
+	ProposedSlots          []string `json:"proposed_slots" validate:"omitempty,max=5,dive,required"`
+	NewAppointmentDateTime string   `json:"new_appointment_date_time" validate:"omitempty"`
+}
+
+// SelectRescheduleSlotRequest is the student picking one of the slots the
+// employer offered. The value must be one of that request's proposed slots.
+type SelectRescheduleSlotRequest struct {
+	SelectedDateTime string `json:"selected_date_time" validate:"required"`
+}
+
+// RejectRescheduleRequest is the employer declining a student's proposed time.
+type RejectRescheduleRequest struct {
+	Reason string `json:"reason" validate:"omitempty"`
 }
 
 // RescheduleResponse is one entry in an interview's reschedule history.
 type RescheduleResponse struct {
-	ID                       uint   `json:"id"`
-	StudentAvailableDateTime string `json:"student_available_date_time"`
-	NewAppointmentDateTime   string `json:"new_appointment_date_time"`
-	RescheduleReason         string `json:"reschedule_reason"`
-	CreatedAt                string `json:"created_at"`
+	ID                       uint     `json:"id"`
+	RequestedBy              string   `json:"requested_by"` // student | employer
+	Status                   string   `json:"status"`       // pending | accepted | rejected
+	StudentAvailableDateTime string   `json:"student_available_date_time"`
+	ProposedSlots            []string `json:"proposed_slots"`
+	NewAppointmentDateTime   string   `json:"new_appointment_date_time"`
+	RescheduleReason         string   `json:"reschedule_reason"`
+	RespondedAt              string   `json:"responded_at"`
+	CreatedAt                string   `json:"created_at"`
 }
 
 // InterviewResultRequest lets the employer notify a student of the interview outcome.

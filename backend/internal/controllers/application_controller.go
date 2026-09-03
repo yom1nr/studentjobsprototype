@@ -57,6 +57,20 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
 		return
 	}
 
+	// Already working for this employer: applying again would start a second
+	// hiring process for someone the employer is already contracted with. The
+	// block is per employer, so other companies stay open — it ends when the
+	// contract does.
+	if live, busy := activeAgreementFor(h.db, student.UserID, jobpost.UserID); busy {
+		detail := "คุณมีสัญญาจ้างงานกับผู้ประกอบการรายนี้อยู่แล้ว"
+		if end := agreementEndText(live); end != "" {
+			detail += " สมัครใหม่ได้หลังสัญญาหมดอายุวันที่ " + end
+		}
+		detail += " (สมัครงานของผู้ประกอบการรายอื่นได้ตามปกติ)"
+		utils.JSONError(c, http.StatusBadRequest, "create failed", detail)
+		return
+	}
+
 	var existing models.Application
 	err := h.db.Where("student_id = ? AND jobpost_id = ?", student.UserID, payload.JobpostID).First(&existing).Error
 	if err == nil {

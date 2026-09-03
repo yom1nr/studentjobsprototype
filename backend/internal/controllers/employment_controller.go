@@ -26,6 +26,42 @@ func NewEmploymentController(db *gorm.DB) *EmploymentController {
 	return &EmploymentController{db: db, validate: validator.New()}
 }
 
+// activeAgreementFor reports the contract currently binding this student to this
+// employer, if any. "Currently" means a draft still awaiting the student's answer,
+// or an accepted contract whose term has not run out — its start date plus its
+// duration in months.
+//
+// A contract with no start date or no duration has no end that can be computed,
+// so it counts as still running: treating it as expired would quietly let a second
+// contract be signed on top of a live one.
+func activeAgreementFor(db *gorm.DB, studentID, employerID uint) (*models.EmploymentAgreement, bool) {
+	var agreements []models.EmploymentAgreement
+	if err := db.Where("student_id = ? AND employer_id = ? AND status IN ?",
+		studentID, employerID, []string{"pending", "accepted"}).Find(&agreements).Error; err != nil {
+		return nil, false
+	}
+	now := time.Now().UTC()
+	for i := range agreements {
+		a := &agreements[i]
+		if a.Status == "pending" || a.StartDate == nil || a.DurationMonths <= 0 {
+			return a, true
+		}
+		if a.StartDate.AddDate(0, a.DurationMonths, 0).After(now) {
+			return a, true
+		}
+	}
+	return nil, false
+}
+
+// agreementEndText renders when a contract runs out, for messages that tell
+// someone to wait for it. Empty when there is no computable end date.
+func agreementEndText(a *models.EmploymentAgreement) string {
+	if a == nil || a.StartDate == nil || a.DurationMonths <= 0 {
+		return ""
+	}
+	return a.StartDate.UTC().AddDate(0, a.DurationMonths, 0).Format("2006-01-02")
+}
+
 // CreateAgreement drafts and sends an employment agreement to a student.
 func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 	employer, ok := h.currentEmployer(c)
@@ -43,37 +79,52 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 		return
 	}
 
-	var student models.Student
-	if err := h.db.First(&student, payload.StudentID).Error; err != nil {
-		utils.JSONError(c, http.StatusNotFound, "student not found", "no student exists with the given id")
-		return
-	}
-
-	// An agreement may only be drafted for a student who has passed an interview
-	// with this employer — hiring can't skip straight past the interview step.
+	// The interview is the anchor: it proves the candidate got through this
+	// employer's process, and it carries the position the contract is for.
 	var passedInterview models.InterviewSchedule
-	err := h.db.Where("student_id = ? AND employer_id = ? AND result = ?", student.UserID, employer.UserID, "passed").
-		First(&passedInterview).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			utils.JSONError(c, http.StatusBadRequest, "create failed", "this student must pass an interview with you before you can send an employment agreement")
-		} else {
-			utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
-		}
+	if err := h.db.Where("interview_id = ? AND employer_id = ?", payload.InterviewID, employer.UserID).
+		First(&passedInterview).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview of yours exists with the given id")
+		return
+	}
+	if passedInterview.Result != "passed" {
+		utils.JSONError(c, http.StatusBadRequest, "create failed", "announce a passing interview result before sending an employment agreement")
 		return
 	}
 
-	// One live agreement per student: a second pending draft would leave the
-	// student two contracts to answer, and re-hiring someone already working for
-	// you is a different action. A rejected one may be replaced.
-	var live models.EmploymentAgreement
-	err = h.db.Where("student_id = ? AND employer_id = ? AND status IN ?", student.UserID, employer.UserID, []string{"pending", "accepted"}).
-		First(&live).Error
+	var student models.Student
+	if err := h.db.First(&student, passedInterview.StudentID).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "student not found", "no student exists for this interview")
+		return
+	}
+
+	// One offer per interview, whatever became of it. A student who turned an
+	// offer down has answered for this position — re-sending it would let an
+	// employer put the same declined terms back in front of them repeatedly.
+	// Deleting the declined record is what frees the candidate up again.
+	var prior models.EmploymentAgreement
+	err := h.db.Where("interview_schedule_id = ?", passedInterview.InterviewID).First(&prior).Error
 	if err == nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", "this student already has an active employment agreement with you")
+		detail := "an employment agreement has already been sent for this interview"
+		if prior.Status == "rejected" {
+			detail = "this student declined the agreement for this interview — delete the declined record first if you want to offer again"
+		}
+		utils.JSONError(c, http.StatusBadRequest, "create failed", detail)
 		return
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
+		return
+	}
+
+	// A student works under one contract per employer at a time. A second one
+	// while the first is still running would leave two live sets of terms — wages,
+	// hours, end date — for the same job relationship.
+	if live, busy := activeAgreementFor(h.db, student.UserID, employer.UserID); busy {
+		detail := "this student is already under contract with you"
+		if end := agreementEndText(live); end != "" {
+			detail += " until " + end
+		}
+		utils.JSONError(c, http.StatusBadRequest, "create failed", detail)
 		return
 	}
 
@@ -83,21 +134,18 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 		return
 	}
 
-	// Record which interview this agreement came out of. The field existed but
-	// was never filled, so every agreement looked unrelated to any interview —
-	// which meant nothing downstream could tell a hire from a stray record.
 	interviewID := passedInterview.InterviewID
 	agreement := &models.EmploymentAgreement{
 		StudentID:           student.UserID,
 		EmployerID:          employer.UserID,
 		InterviewScheduleID: &interviewID,
 		StartDate:           &start,
-		WageRate:        payload.WageRate,
-		DurationMonths:  payload.DurationMonths,
-		WorkingHours:    payload.WorkingHours,
-		LeavePolicy:     payload.LeavePolicy,
-		AdditionalTerms: payload.AdditionalTerms,
-		Status:          "pending",
+		WageRate:            payload.WageRate,
+		DurationMonths:      payload.DurationMonths,
+		WorkingHours:        payload.WorkingHours,
+		LeavePolicy:         payload.LeavePolicy,
+		AdditionalTerms:     payload.AdditionalTerms,
+		Status:              "pending",
 	}
 	if err := h.db.Create(agreement).Error; err != nil {
 		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
@@ -108,6 +156,60 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 		fmt.Sprintf("%s ส่งข้อตกลงการจ้างงานให้คุณตรวจสอบ กรุณาตอบรับหรือปฏิเสธ", employer.CompanyName))
 
 	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(agreement, employer.CompanyName, h.studentName(student.UserID)))
+}
+
+// DeleteAgreement removes a declined offer from the employer's records.
+//
+// Only rejected drafts can go: a pending one is still awaiting the student's
+// answer, and an accepted one is a contract in force that time records and
+// payroll are billed against. Keeping a declined offer is the default — it
+// preserves what was offered and why it was turned down — so this exists for
+// clearing out drafts that should not be on file at all.
+func (h *EmploymentController) DeleteAgreement(c *gin.Context) {
+	employer, ok := h.currentEmployer(c)
+	if !ok {
+		return
+	}
+	id, err := utils.ParseUintParam(c, "id")
+	if err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "invalid agreement id", "id must be a number")
+		return
+	}
+
+	var agreement models.EmploymentAgreement
+	if err := h.db.Where("agreement_id = ? AND employer_id = ?", id, employer.UserID).First(&agreement).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "agreement not found", "no agreement of yours exists with the given id")
+		return
+	}
+	if agreement.Status != "rejected" {
+		utils.JSONError(c, http.StatusBadRequest, "delete failed", "only an agreement the student declined can be deleted")
+		return
+	}
+
+	var payrolls int64
+	if err := h.db.Model(&models.Payroll{}).Where("agreement_id = ?", agreement.AgreementID).Count(&payrolls).Error; err != nil {
+		utils.JSONInternalError(c, "delete failed", err)
+		return
+	}
+	if payrolls > 0 {
+		utils.JSONError(c, http.StatusBadRequest, "delete failed", "this agreement has payroll records attached")
+		return
+	}
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("employment_agreement_id = ?", agreement.AgreementID).Delete(&models.Notification{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("employment_agreement_id = ?", agreement.AgreementID).Delete(&models.Document{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&models.EmploymentAgreement{}, agreement.AgreementID).Error
+	}); err != nil {
+		utils.JSONInternalError(c, "delete failed", err)
+		return
+	}
+
+	utils.JSONSuccess(c, http.StatusOK, gin.H{"deleted": true})
 }
 
 // ListMine returns agreements scoped to the current user's role.
@@ -280,19 +382,20 @@ func (h *EmploymentController) mapToResponse(a *models.EmploymentAgreement, comp
 		startDate = a.StartDate.Format("2006-01-02")
 	}
 	return dto.AgreementResponse{
-		ID:              a.AgreementID,
-		StudentID:       a.StudentID,
-		StudentName:     studentName,
-		EmployerID:      a.EmployerID,
-		CompanyName:     companyName,
-		StartDate:       startDate,
-		WageRate:        a.WageRate,
-		DurationMonths:  a.DurationMonths,
-		WorkingHours:    a.WorkingHours,
-		LeavePolicy:     a.LeavePolicy,
-		AdditionalTerms: a.AdditionalTerms,
-		Status:          a.Status,
-		RejectReason:    a.RejectReason,
-		CreatedAt:       a.CreatedAt.Format(time.RFC3339),
+		ID:                  a.AgreementID,
+		InterviewScheduleID: a.InterviewScheduleID,
+		StudentID:           a.StudentID,
+		StudentName:         studentName,
+		EmployerID:          a.EmployerID,
+		CompanyName:         companyName,
+		StartDate:           startDate,
+		WageRate:            a.WageRate,
+		DurationMonths:      a.DurationMonths,
+		WorkingHours:        a.WorkingHours,
+		LeavePolicy:         a.LeavePolicy,
+		AdditionalTerms:     a.AdditionalTerms,
+		Status:              a.Status,
+		RejectReason:        a.RejectReason,
+		CreatedAt:           a.CreatedAt.Format(time.RFC3339),
 	}
 }

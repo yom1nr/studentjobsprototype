@@ -20,3 +20,8 @@ export function acceptAgreement(token: string, id: number): Promise<AgreementRec
 export function rejectAgreement(token: string, id: number, payload: RejectAgreementRequest): Promise<AgreementRecord> {
   return apiFetch<AgreementRecord>(`/api/v1/student/agreements/${id}/reject`, { method: 'POST', token, body: payload })
 }
+
+/** Remove a declined offer from the employer's records. Only rejected ones. */
+export function deleteAgreement(token: string, id: number): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/employer/agreements/${id}`, { method: 'DELETE', token })
+}

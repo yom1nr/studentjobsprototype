@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -69,6 +70,11 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		utils.JSONError(c, http.StatusNotFound, "student not found", "no student exists for this application")
 		return
 	}
+
+	// Declining an offer closes that position for this student, not every position
+	// they applied for — so nothing extra is checked here. The one-interview-per-
+	// application rule below already stops the declined application itself from
+	// being scheduled again.
 
 	// One live appointment per application — the UI shows a single appointment
 	// per application row, so a second would silently become unreachable.
@@ -166,6 +172,17 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// A finished appointment is a record of what happened, not a plan — moving it
+	// after the result is out would rewrite history and contradict what the
+	// student was already told.
+	if interview.Status == "completed" || interview.Result != "" {
+		utils.JSONError(c, http.StatusBadRequest, "update failed", "this interview is already finished")
+		return
+	}
+	if interview.Status == "cancelled" {
+		utils.JSONError(c, http.StatusBadRequest, "update failed", "this interview has been cancelled")
+		return
+	}
 
 	var payload dto.UpdateInterviewRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -219,25 +236,61 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		return
 	}
 
+	// Only one request may be open at a time, otherwise approving an older one
+	// would silently overwrite a newer agreed time.
+	var open models.RescheduleInterview
+	err := h.db.Where("interview_schedule_id = ? AND status = ?", interview.InterviewID, "pending").First(&open).Error
+	if err == nil {
+		utils.JSONError(c, http.StatusBadRequest, "request failed", "there is already a reschedule request waiting for an answer")
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		utils.JSONInternalError(c, "request failed", err)
+		return
+	}
+
 	role, _ := utils.GetUserRoleFromContext(c)
 	requestedBy := "student"
 	if role == "employer" {
 		requestedBy = "employer"
 	}
+
 	reschedule := &models.RescheduleInterview{
 		InterviewScheduleID: interview.InterviewID,
 		RescheduleReason:    payload.Reason,
 		RequestedBy:         requestedBy,
 		Status:              "pending",
 	}
-	if t, err := time.Parse(time.RFC3339, payload.StudentAvailableDateTime); err == nil {
-		reschedule.StudentAvailableDateTime = &t
+
+	if requestedBy == "employer" {
+		// The employer offers times; the student picks one. Store them normalised
+		// so the student's later pick can be matched exactly against the list.
+		if len(payload.ProposedSlots) == 0 {
+			utils.JSONError(c, http.StatusBadRequest, "request failed", "offer at least one date for the student to choose from")
+			return
+		}
+		slots := make([]string, 0, len(payload.ProposedSlots))
+		for _, raw := range payload.ProposedSlots {
+			t, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				utils.JSONError(c, http.StatusBadRequest, "request failed", "each proposed slot must be RFC3339, e.g. 2026-09-20T13:30:00Z")
+				return
+			}
+			slots = append(slots, t.UTC().Format(time.RFC3339))
+		}
+		reschedule.ProposedSlots = strings.Join(slots, ",")
+	} else {
+		// The student names the single time they want; the employer decides.
+		t, err := time.Parse(time.RFC3339, payload.StudentAvailableDateTime)
+		if err != nil {
+			utils.JSONError(c, http.StatusBadRequest, "request failed", "student_available_date_time must be RFC3339, e.g. 2026-09-20T13:30:00Z")
+			return
+		}
+		utc := t.UTC()
+		reschedule.StudentAvailableDateTime = &utc
 	}
-	if t, err := time.Parse(time.RFC3339, payload.NewAppointmentDateTime); err == nil {
-		reschedule.NewAppointmentDateTime = &t
-	}
+
 	if err := h.db.Create(reschedule).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "request failed", err.Error())
+		utils.JSONInternalError(c, "request failed", err)
 		return
 	}
 	h.db.Model(interview).Update("status", "rescheduling")
@@ -247,13 +300,218 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 	var employer models.Employer
 	h.db.First(&employer, interview.EmployerID)
 
-	if role == "employer" {
-		notifyUser(h.db, student.UserID, "ผู้ประกอบการขอเปลี่ยนกำหนดการสัมภาษณ์", "interview_reschedule_request", payload.Reason)
+	if requestedBy == "employer" {
+		notifyAboutReschedule(h.db, student.UserID, "ผู้ประกอบการขอเลื่อนนัดสัมภาษณ์", "interview_reschedule_offer",
+			fmt.Sprintf("%s เสนอวันสัมภาษณ์ใหม่ %d วันให้เลือก — กรุณาเลือกวันที่สะดวก%s",
+				employer.CompanyName, len(payload.ProposedSlots), reasonSuffix(payload.Reason)),
+			interview.InterviewID, reschedule.RescheduleID)
 	} else {
-		notifyUser(h.db, employer.UserID, "นักศึกษาขอเลื่อนนัดสัมภาษณ์", "interview_reschedule_request", payload.Reason)
+		notifyAboutReschedule(h.db, employer.UserID, "นักศึกษาขอเลื่อนนัดสัมภาษณ์", "interview_reschedule_request",
+			fmt.Sprintf("%s ขอเลื่อนนัดเป็นวันที่ %s — กรุณาอนุมัติหรือปฏิเสธ%s",
+				h.studentName(student.UserID), reschedule.StudentAvailableDateTime.Format("2006-01-02 15:04"), reasonSuffix(payload.Reason)),
+			interview.InterviewID, reschedule.RescheduleID)
 	}
 
-	utils.JSONSuccess(c, http.StatusCreated, gin.H{"created": true})
+	utils.JSONSuccess(c, http.StatusCreated, mapRescheduleToResponse(reschedule))
+}
+
+// reasonSuffix appends the requester's note to a notification when they wrote one.
+func reasonSuffix(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		return ""
+	}
+	return " (เหตุผล: " + reason + ")"
+}
+
+// applySlotToInterview moves the appointment to t and puts the interview back to
+// a confirmed state, so an agreed reschedule leaves nothing stuck in
+// "rescheduling". AppointmentDate and AppointmentTime are stored separately, so
+// the slot is split across both.
+func (h *InterviewController) applySlotToInterview(tx *gorm.DB, interviewID uint, t time.Time) error {
+	// Slots arrive as UTC and are stored that way, but the driver hands them back
+	// in the server's local zone. Normalising here keeps the wall clock the user
+	// picked — without it a 14:00 request lands on the appointment as 21:00.
+	utc := t.UTC()
+	day := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+	return tx.Model(&models.InterviewSchedule{}).Where("interview_id = ?", interviewID).
+		Updates(map[string]any{
+			"appointment_date": day,
+			"appointment_time": utc.Format("15:04"),
+			"status":           "confirmed",
+		}).Error
+}
+
+// RespondToReschedule is the employer approving or rejecting the time a student
+// asked to move to. Approving moves the appointment; rejecting leaves the
+// original time standing. Either way the interview stops being "rescheduling".
+func (h *InterviewController) RespondToReschedule(c *gin.Context, approve bool) {
+	employer, ok := h.currentEmployer(c)
+	if !ok {
+		return
+	}
+	id, err := utils.ParseUintParam(c, "id")
+	if err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "invalid reschedule id", "id must be a number")
+		return
+	}
+
+	var reschedule models.RescheduleInterview
+	if err := h.db.First(&reschedule, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
+		return
+	}
+	var interview models.InterviewSchedule
+	if err := h.db.First(&interview, reschedule.InterviewScheduleID).Error; err != nil || interview.EmployerID != employer.UserID {
+		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
+		return
+	}
+	if reschedule.RequestedBy != "student" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "this request is for the student to answer, not you")
+		return
+	}
+	if reschedule.Status != "pending" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "this reschedule request has already been answered")
+		return
+	}
+
+	var payload dto.RejectRescheduleRequest
+	_ = c.ShouldBindJSON(&payload)
+
+	now := time.Now().UTC()
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"responded_at": &now}
+		if approve {
+			updates["status"] = "accepted"
+			updates["new_appointment_date_time"] = reschedule.StudentAvailableDateTime
+		} else {
+			updates["status"] = "rejected"
+		}
+		if err := tx.Model(&models.RescheduleInterview{}).Where("reschedule_id = ?", reschedule.RescheduleID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		if approve && reschedule.StudentAvailableDateTime != nil {
+			return h.applySlotToInterview(tx, interview.InterviewID, *reschedule.StudentAvailableDateTime)
+		}
+		// Turned down: the original appointment stands, so hand the interview back
+		// to its pre-request state rather than leaving it in "rescheduling".
+		return tx.Model(&models.InterviewSchedule{}).Where("interview_id = ?", interview.InterviewID).
+			Update("status", "confirmed").Error
+	}); err != nil {
+		utils.JSONInternalError(c, "action failed", err)
+		return
+	}
+
+	var student models.Student
+	h.db.First(&student, interview.StudentID)
+	if approve {
+		notifyAboutReschedule(h.db, student.UserID, "อนุมัติการเลื่อนนัดสัมภาษณ์", "interview_reschedule_result",
+			fmt.Sprintf("%s อนุมัติการเลื่อนนัดแล้ว นัดใหม่คือวันที่ %s — รอผลการสัมภาษณ์ต่อไป",
+				employer.CompanyName, reschedule.StudentAvailableDateTime.UTC().Format("2006-01-02 15:04")),
+			interview.InterviewID, reschedule.RescheduleID)
+	} else {
+		notifyAboutReschedule(h.db, student.UserID, "ไม่อนุมัติการเลื่อนนัดสัมภาษณ์", "interview_reschedule_result",
+			fmt.Sprintf("%s ไม่อนุมัติการเลื่อนนัด กำหนดการเดิมยังมีผลอยู่%s", employer.CompanyName, reasonSuffix(payload.Reason)),
+			interview.InterviewID, reschedule.RescheduleID)
+	}
+
+	h.db.First(&reschedule, reschedule.RescheduleID)
+	utils.JSONSuccess(c, http.StatusOK, mapRescheduleToResponse(&reschedule))
+}
+
+// ApproveReschedule accepts the student's proposed time.
+func (h *InterviewController) ApproveReschedule(c *gin.Context) { h.RespondToReschedule(c, true) }
+
+// RejectReschedule declines the student's proposed time.
+func (h *InterviewController) RejectReschedule(c *gin.Context) { h.RespondToReschedule(c, false) }
+
+// SelectRescheduleSlot is the student choosing one of the times the employer
+// offered. There is no further approval step — the employer already committed to
+// every slot they listed, so picking one settles the appointment immediately.
+func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
+	userID, ok := utils.GetUserIDFromContext(c)
+	if !ok {
+		utils.JSONError(c, http.StatusUnauthorized, "authorization required", "user id missing from token")
+		return
+	}
+	id, err := utils.ParseUintParam(c, "id")
+	if err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "invalid reschedule id", "id must be a number")
+		return
+	}
+
+	var reschedule models.RescheduleInterview
+	if err := h.db.First(&reschedule, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
+		return
+	}
+	var interview models.InterviewSchedule
+	if err := h.db.First(&interview, reschedule.InterviewScheduleID).Error; err != nil || interview.StudentID != userID {
+		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
+		return
+	}
+	if reschedule.RequestedBy != "employer" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "this request is for the employer to answer, not you")
+		return
+	}
+	if reschedule.Status != "pending" {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "this reschedule request has already been answered")
+		return
+	}
+
+	var payload dto.SelectRescheduleSlotRequest
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
+		return
+	}
+	if err := h.validate.Struct(payload); err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
+		return
+	}
+	chosen, err := time.Parse(time.RFC3339, payload.SelectedDateTime)
+	if err != nil {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "selected_date_time must be RFC3339")
+		return
+	}
+	// Only a time the employer actually offered may be chosen.
+	normalised := chosen.UTC().Format(time.RFC3339)
+	offered := false
+	for _, s := range strings.Split(reschedule.ProposedSlots, ",") {
+		if s == normalised {
+			offered = true
+			break
+		}
+	}
+	if !offered {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "pick one of the dates the employer offered")
+		return
+	}
+
+	now := time.Now().UTC()
+	utc := chosen.UTC()
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.RescheduleInterview{}).Where("reschedule_id = ?", reschedule.RescheduleID).
+			Updates(map[string]any{
+				"status":                    "accepted",
+				"new_appointment_date_time": &utc,
+				"responded_at":              &now,
+			}).Error; err != nil {
+			return err
+		}
+		return h.applySlotToInterview(tx, interview.InterviewID, utc)
+	}); err != nil {
+		utils.JSONInternalError(c, "action failed", err)
+		return
+	}
+
+	var employer models.Employer
+	h.db.First(&employer, interview.EmployerID)
+	notifyAboutReschedule(h.db, employer.UserID, "นักศึกษาเลือกวันสัมภาษณ์แล้ว", "interview_reschedule_result",
+		fmt.Sprintf("%s เลือกวันสัมภาษณ์เป็นวันที่ %s", h.studentName(interview.StudentID), utc.Format("2006-01-02 15:04")),
+		interview.InterviewID, reschedule.RescheduleID)
+
+	h.db.First(&reschedule, reschedule.RescheduleID)
+	utils.JSONSuccess(c, http.StatusOK, mapRescheduleToResponse(&reschedule))
 }
 
 // ListReschedules returns the reschedule history for one interview.
@@ -516,17 +774,46 @@ func mapRescheduleToResponse(r *models.RescheduleInterview) dto.RescheduleRespon
 	if r.NewAppointmentDateTime != nil {
 		newAppointment = r.NewAppointmentDateTime.Format(time.RFC3339)
 	}
+	respondedAt := ""
+	if r.RespondedAt != nil {
+		respondedAt = r.RespondedAt.Format(time.RFC3339)
+	}
+	slots := []string{}
+	if r.ProposedSlots != "" {
+		slots = strings.Split(r.ProposedSlots, ",")
+	}
 	return dto.RescheduleResponse{
 		ID:                       r.RescheduleID,
+		RequestedBy:              r.RequestedBy,
+		Status:                   r.Status,
 		StudentAvailableDateTime: studentAvailable,
+		ProposedSlots:            slots,
 		NewAppointmentDateTime:   newAppointment,
 		RescheduleReason:         r.RescheduleReason,
+		RespondedAt:              respondedAt,
 		CreatedAt:                r.CreatedAt.Format(time.RFC3339),
 	}
 }
 
 // notifyAboutInterview is notifyUser plus a link back to the interview that
 // triggered it, so the notification list can deep-link into the appointment.
+// notifyAboutReschedule links the notification to both the interview and the
+// reschedule request behind it, so the student's notification can open straight
+// into the slot picker for that specific request.
+func notifyAboutReschedule(db *gorm.DB, userID uint, title, notificationType, message string, interviewID, rescheduleID uint) {
+	n := &models.Notification{
+		UserID:                userID,
+		InterviewScheduleID:   &interviewID,
+		RescheduleInterviewID: &rescheduleID,
+		Title:                 title,
+		NotificationType:      notificationType,
+		Message:               message,
+	}
+	if err := db.Create(n).Error; err != nil {
+		log.Printf("failed to create notification for user %d: %v", userID, err)
+	}
+}
+
 func notifyAboutInterview(db *gorm.DB, userID uint, title, notificationType, message string, interviewID uint) {
 	n := &models.Notification{
 		UserID:              userID,

@@ -14,24 +14,42 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import DrawOutlinedIcon from '@mui/icons-material/DrawOutlined'
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import MailOutlineIcon from '@mui/icons-material/MailOutlineOutlined'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import SentimentDissatisfiedOutlinedIcon from '@mui/icons-material/SentimentDissatisfiedOutlined'
 import { useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { ApiError } from '../../services/https'
 import { listEmployerApplications } from '../../services/https/applications'
+import { listMyAgreements } from '../../services/https/agreements'
 import {
   confirmInterviewAttendance,
   createInterview,
   listMyInterviews,
+  approveReschedule,
+  listReschedules,
+  rejectReschedule,
   requestReschedule,
+  selectRescheduleSlot,
   sendInterviewResult,
   updateInterview,
 } from '../../services/https/interviews'
 import type { Application } from '../../interface/IJobInterface'
-import type { InterviewScheduleRecord } from '../../interface/IInterviewInterface'
+import type { AgreementRecord, InterviewScheduleRecord, RescheduleEntry } from '../../interface/IInterviewInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6', ok: '#217829' }
+
+/** Slots travel as RFC3339 in UTC and the wall clock in them is the time both
+ *  sides agreed to, so render those digits rather than shifting to the viewer's
+ *  zone — a 13:30 interview must not read as 20:30 for a reader in Bangkok. */
+function formatSlot(rfc3339: string): string {
+  if (!rfc3339) return '-'
+  const d = new Date(rfc3339)
+  if (Number.isNaN(d.getTime())) return rfc3339
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} เวลา ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} น.`
+}
 
 function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
@@ -148,6 +166,12 @@ function StudentInterviewsView() {
   const [confirming, setConfirming] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
 
+  const [reschedules, setReschedules] = useState<RescheduleEntry[]>([])
+  const [reloadToken, setReloadToken] = useState(0)
+  const [chosenSlot, setChosenSlot] = useState('')
+  const [choosing, setChoosing] = useState(false)
+  const [slotConfirmed, setSlotConfirmed] = useState<string | null>(null)
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -155,7 +179,16 @@ function StudentInterviewsView() {
       setLoading(true)
       try {
         const data = await listMyInterviews(token!)
-        if (!cancelled) setInterviews(data)
+        if (cancelled) return
+        setInterviews(data)
+        // The appointment alone doesn't say whether an answer is outstanding, so
+        // pull the request history that goes with it.
+        if (data[0]) {
+          const rs = await listReschedules(token!, data[0].id)
+          if (!cancelled) setReschedules(rs)
+        } else if (!cancelled) {
+          setReschedules([])
+        }
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลนัดสัมภาษณ์ไม่สำเร็จ'))
       } finally {
@@ -164,9 +197,51 @@ function StudentInterviewsView() {
     }
     void load()
     return () => { cancelled = true }
-  }, [token])
+  }, [token, reloadToken])
 
   const interview = interviews[0] ?? null
+
+  // The appointment's real state lives on the record (pending / confirmed /
+  // rescheduling / completed / cancelled). `confirmed` below is only an optimistic
+  // flag for the moment right after the student clicks, so reading it alone made
+  // every reloaded appointment look like it was still waiting to happen.
+  const isFinished = interview != null && (interview.status === 'completed' || interview.result !== '')
+  const isCancelled = interview?.status === 'cancelled'
+  const isConfirmed = confirmed || interview?.status === 'confirmed'
+
+  // A reschedule can be waiting on either side, and which side decides what the
+  // student is shown: their own request waits for the employer's answer, while
+  // the employer's offer is waiting on the student to pick a time.
+  const pendingRequest = reschedules.find((r) => r.status === 'pending')
+  const awaitingEmployerApproval = pendingRequest?.requested_by === 'student'
+  const slotOffer = pendingRequest?.requested_by === 'employer' ? pendingRequest : null
+
+  const appointmentChip = isFinished
+    ? { label: 'สัมภาษณ์เสร็จสิ้น', color: '#217829', bg: '#EAF7EA' }
+    : isCancelled
+      ? { label: 'ยกเลิกนัดแล้ว', color: '#DA1E28', bg: '#FDEAEA' }
+      : awaitingEmployerApproval
+        ? { label: 'รอการอนุมัติเลื่อนนัด', color: '#B5850C', bg: '#FFF0DD' }
+        : slotOffer
+          ? { label: 'กรุณาเลือกวันสัมภาษณ์ใหม่', color: '#C2410C', bg: '#FFEDD5' }
+          : isConfirmed
+            ? { label: 'รอผลการสัมภาษณ์', color: colors.ok, bg: '#EAF7EA' }
+            : { label: 'รอยืนยันเข้าสัมภาษณ์', color: '#B5850C', bg: '#FFF0DD' }
+
+  async function chooseSlot() {
+    if (!token || !slotOffer || !chosenSlot) return
+    setChoosing(true)
+    try {
+      await selectRescheduleSlot(token, slotOffer.id, { selected_date_time: chosenSlot })
+      setSlotConfirmed(chosenSlot)
+      setChosenSlot('')
+      setReloadToken((t) => t + 1)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'เลือกวันสัมภาษณ์ไม่สำเร็จ'))
+    } finally {
+      setChoosing(false)
+    }
+  }
 
   async function submitReschedule() {
     if (!token || !interview) return
@@ -225,7 +300,7 @@ function StudentInterviewsView() {
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr' }, gap: 3, alignItems: 'start' }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-              <Chip label={confirmed ? 'ยืนยันแล้ว' : 'รอการยืนยัน'} size="small" sx={{ bgcolor: confirmed ? '#EAF7EA' : '#FFF0DD', color: confirmed ? colors.ok : '#B5850C', fontWeight: 600 }} />
+              <Chip label={appointmentChip.label} size="small" sx={{ bgcolor: appointmentChip.bg, color: appointmentChip.color, fontWeight: 600 }} />
               <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>นัดหมายเลขที่ IV-{String(interview.id).padStart(4, '0')}</Typography>
             </Box>
             <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>{interview.company_name}</Typography>
@@ -266,21 +341,35 @@ function StudentInterviewsView() {
           </Box>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {rescheduleRequested ? (
-              <Chip label="ส่งคำขอเลื่อนนัดแล้ว รอผู้ประกอบการตอบรับ" sx={{ bgcolor: '#FFF0DD', color: '#B5850C', fontWeight: 600, height: 'auto', py: 1 }} />
+            {/* Nothing left to confirm or move once the interview has happened or
+                was cancelled — the API rejects both, so don't offer them. */}
+            {isFinished || isCancelled ? (
+              <Box sx={{ bgcolor: '#F7F9FC', border: `1px solid ${colors.border}`, borderRadius: 2, p: 2 }}>
+                <Typography sx={{ fontSize: 13, color: '#697077' }}>
+                  {isCancelled
+                    ? 'นัดหมายนี้ถูกยกเลิกแล้ว'
+                    : 'การสัมภาษณ์เสร็จสิ้นแล้ว — ดูผลการสัมภาษณ์ได้ที่หน้าก่อนหน้า'}
+                </Typography>
+              </Box>
             ) : (
-              <Button variant="outlined" onClick={() => setRescheduleOpen(true)} sx={{ borderRadius: '40px', textTransform: 'none', color: colors.navy, borderColor: colors.border }}>
-                ขอเลื่อน / เปลี่ยนนัด
-              </Button>
+              <>
+                {rescheduleRequested || pendingRequest ? (
+                  <Chip label="ส่งคำขอเลื่อนนัดแล้ว รอผู้ประกอบการตอบรับ" sx={{ bgcolor: '#FFF0DD', color: '#B5850C', fontWeight: 600, height: 'auto', py: 1 }} />
+                ) : (
+                  <Button variant="outlined" onClick={() => setRescheduleOpen(true)} sx={{ borderRadius: '40px', textTransform: 'none', color: colors.navy, borderColor: colors.border }}>
+                    ขอเลื่อน / เปลี่ยนนัด
+                  </Button>
+                )}
+                <Button
+                  variant="contained"
+                  disabled={isConfirmed || confirming}
+                  onClick={confirmAttendance}
+                  sx={{ borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
+                >
+                  {isConfirmed ? 'ยืนยันแล้ว' : confirming ? 'กำลังยืนยัน...' : 'ยืนยันเข้ารับสัมภาษณ์'}
+                </Button>
+              </>
             )}
-            <Button
-              variant="contained"
-              disabled={confirmed || confirming}
-              onClick={confirmAttendance}
-              sx={{ borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
-            >
-              {confirmed ? 'ยืนยันแล้ว' : confirming ? 'กำลังยืนยัน...' : 'ยืนยันเข้ารับสัมภาษณ์'}
-            </Button>
           </Box>
         </Box>
 
@@ -329,27 +418,158 @@ function StudentInterviewsView() {
         step={1}
         title="การนัดสัมภาษณ์"
         subtitle={`${interview.company_name} • ${interview.appointment_date} ${interview.appointment_time} น.`}
-        statusLabel={confirmed ? 'ยืนยันแล้ว' : 'มีการนัดสัมภาษณ์'}
-        statusColor={confirmed ? colors.ok : '#B5850C'}
-        statusBg={confirmed ? '#EAF7EA' : '#FFF0DD'}
+        statusLabel={appointmentChip.label}
+        statusColor={appointmentChip.color}
+        statusBg={appointmentChip.bg}
         locked={false}
         actionLabel="รายละเอียด"
         actionColor={colors.navy}
         onAction={() => setView('appointment')}
       />
 
-      <StepCard
-        step={2}
-        title="ผลการสัมภาษณ์"
-        subtitle="ผลการพิจารณาจะส่งผ่านการแจ้งเตือน"
-        statusLabel="ดูที่การแจ้งเตือน"
-        statusColor="#0090FF"
-        statusBg="#EFF6FF"
-        locked={false}
-        actionLabel="ไปที่การแจ้งเตือน"
-        actionColor="#0090FF"
-        onAction={() => navigate('/notifications')}
-      />
+      {/* The employer offered times and is waiting on the student — this is the
+          one thing blocking the interview, so it goes above the result card. */}
+      {slotOffer && (
+        <Box sx={{ border: '1px solid #FDBA74', bgcolor: '#FFF7ED', borderRadius: 3, p: 3 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 18, color: '#9A3412' }}>
+            {interview.company_name} ขอเลื่อนนัด — กรุณาเลือกวันที่สะดวก
+          </Typography>
+          {slotOffer.reschedule_reason && (
+            <Typography sx={{ fontSize: 13, color: '#7C2D12', mt: 0.5 }}>
+              เหตุผล: {slotOffer.reschedule_reason}
+            </Typography>
+          )}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, mt: 2 }}>
+            {slotOffer.proposed_slots.map((slot) => {
+              const picked = chosenSlot === slot
+              return (
+                <Box
+                  key={slot}
+                  onClick={() => setChosenSlot(slot)}
+                  sx={{
+                    display: 'flex', alignItems: 'center', gap: 1.5, cursor: 'pointer',
+                    border: `2px solid ${picked ? '#EA580C' : colors.border}`,
+                    bgcolor: picked ? '#FFEDD5' : '#fff',
+                    borderRadius: 2, px: 2, py: 1.5,
+                  }}
+                >
+                  <Box sx={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${picked ? '#EA580C' : '#C4C4C4'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {picked && <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#EA580C' }} />}
+                  </Box>
+                  <Typography sx={{ fontSize: 15, fontWeight: picked ? 700 : 500, color: colors.navy }}>
+                    {formatSlot(slot)}
+                  </Typography>
+                </Box>
+              )
+            })}
+          </Box>
+          <Button
+            fullWidth
+            variant="contained"
+            disabled={!chosenSlot || choosing}
+            onClick={() => void chooseSlot()}
+            sx={{ mt: 2.5, height: 48, borderRadius: '40px', textTransform: 'none', fontWeight: 700, bgcolor: '#EA580C', '&:hover': { bgcolor: '#C2410C' } }}
+          >
+            {choosing ? 'กำลังส่ง...' : 'ยืนยันวันที่เลือก'}
+          </Button>
+        </Box>
+      )}
+
+      {/* Waiting on the employer to answer the student's own request. */}
+      {awaitingEmployerApproval && pendingRequest && (
+        <Box sx={{ border: `1px solid ${colors.border}`, bgcolor: '#FFFBEB', borderRadius: 3, p: 3 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 17, color: '#B5850C' }}>รอการอนุมัติเลื่อนนัด</Typography>
+          <Typography sx={{ fontSize: 14, color: '#78350F', mt: 0.5 }}>
+            คุณขอเลื่อนเป็นวันที่ <b>{formatSlot(pendingRequest.student_available_date_time)}</b> — รอ {interview.company_name} ตอบกลับ
+          </Typography>
+          <Typography sx={{ fontSize: 13, color: '#9A7B2F', mt: 1 }}>
+            ระหว่างนี้กำหนดการเดิมยังมีผลอยู่ หากไม่ได้รับการอนุมัติ ให้มาตามวันเดิม
+          </Typography>
+        </Box>
+      )}
+
+      {/* Just picked a slot — say plainly that they can simply turn up then. */}
+      {slotConfirmed && !slotOffer && (
+        <Box sx={{ border: '1px solid #C7E8C9', bgcolor: '#F4FBF4', borderRadius: 3, p: 3, textAlign: 'center' }}>
+          <CheckCircleIcon sx={{ fontSize: 56, color: '#2E7D32' }} />
+          <Typography sx={{ fontWeight: 700, fontSize: 18, color: '#217829', mt: 1 }}>
+            บันทึกวันสัมภาษณ์ใหม่แล้ว
+          </Typography>
+          <Typography sx={{ fontSize: 15, color: '#3B5B3D', mt: 0.5 }}>
+            คุณสามารถเข้ามาสัมภาษณ์ได้เลยในวันที่ <b>{formatSlot(slotConfirmed)}</b>
+          </Typography>
+        </Box>
+      )}
+
+      {/* The outcome is persisted on the interview, so show it here instead of
+          sending the student off to dig through notifications. Only fall back to
+          the "watch your notifications" card while no result has been announced. */}
+      {interview.result === 'passed' ? (
+        <Box sx={{ border: '1px solid #C7E8C9', bgcolor: '#F4FBF4', borderRadius: 3, p: 4, textAlign: 'center' }}>
+          <CheckCircleIcon sx={{ fontSize: 110, color: '#2E7D32' }} />
+          <Typography sx={{ fontWeight: 700, fontSize: 26, color: '#217829', mt: 1.5 }}>
+            คุณผ่านการสัมภาษณ์แล้ว
+          </Typography>
+          <Typography sx={{ fontSize: 15, color: '#3B5B3D', mt: 1 }}>
+            ยินดีด้วย! {interview.company_name} ตอบรับคุณเข้าทำงานแล้ว
+          </Typography>
+          {interview.result_comment && (
+            <Box sx={{ bgcolor: '#fff', border: '1px solid #C7E8C9', borderRadius: 2, p: 2, mt: 2.5, textAlign: 'left' }}>
+              <Typography sx={{ fontSize: 12, color: '#697077', mb: 0.5 }}>ข้อความจากผู้ประกอบการ</Typography>
+              <Typography sx={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>{interview.result_comment}</Typography>
+            </Box>
+          )}
+          <Box sx={{ bgcolor: '#EAF7EA', borderRadius: 2, p: 2, mt: 2.5 }}>
+            <Typography sx={{ fontSize: 15, fontWeight: 600, color: '#217829' }}>
+              กรุณาไปที่เมนู &quot;แจ้งผลการจ้างงาน&quot; เพื่อตรวจสอบและตอบรับข้อตกลงการจ้างงาน
+            </Typography>
+          </Box>
+          <Button
+            variant="contained"
+            endIcon={<ArrowForwardIcon />}
+            onClick={() => navigate('/employment')}
+            sx={{ mt: 3, px: 4, height: 52, borderRadius: '40px', textTransform: 'none', fontWeight: 700, fontSize: 16, bgcolor: '#217829', '&:hover': { bgcolor: '#1B5F21' } }}
+          >
+            ไปที่แจ้งผลการจ้างงาน
+          </Button>
+        </Box>
+      ) : interview.result === 'failed' ? (
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 4, textAlign: 'center' }}>
+          <SentimentDissatisfiedOutlinedIcon sx={{ fontSize: 96, color: '#9AA0A6' }} />
+          <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy, mt: 1.5 }}>
+            ผลการสัมภาษณ์: ไม่ผ่านการพิจารณา
+          </Typography>
+          <Typography sx={{ fontSize: 14, color: '#697077', mt: 1 }}>
+            ขอบคุณที่สนใจร่วมงานกับ {interview.company_name} — ยังมีงานอื่นรอคุณอยู่
+          </Typography>
+          {interview.result_comment && (
+            <Box sx={{ bgcolor: '#F7F9FC', borderRadius: 2, p: 2, mt: 2.5, textAlign: 'left' }}>
+              <Typography sx={{ fontSize: 12, color: '#697077', mb: 0.5 }}>ข้อความจากผู้ประกอบการ</Typography>
+              <Typography sx={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>{interview.result_comment}</Typography>
+            </Box>
+          )}
+          <Button
+            endIcon={<ArrowForwardIcon />}
+            onClick={() => navigate('/jobs')}
+            sx={{ mt: 3, px: 3, borderRadius: '40px', textTransform: 'none', fontWeight: 600, color: colors.navy, bgcolor: '#F0F0F0', '&:hover': { bgcolor: '#E4E4E4' } }}
+          >
+            ค้นหางานอื่น
+          </Button>
+        </Box>
+      ) : (
+        <StepCard
+          step={2}
+          title="ผลการสัมภาษณ์"
+          subtitle="ยังไม่ประกาศผล — ผลการพิจารณาจะแจ้งให้ทราบที่นี่และผ่านการแจ้งเตือน"
+          statusLabel="รอผล"
+          statusColor="#B5850C"
+          statusBg="#FFF0DD"
+          locked={false}
+          actionLabel="ไปที่การแจ้งเตือน"
+          actionColor="#0090FF"
+          onAction={() => navigate('/notifications')}
+        />
+      )}
     </Box>
   )
 }
@@ -388,18 +608,33 @@ function EmployerInterviewsView() {
   const [rescheduleNote, setRescheduleNote] = useState('')
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
   const [rescheduleConfirmOpen, setRescheduleConfirmOpen] = useState(false)
+  const [offerSlots, setOfferSlots] = useState([
+    { date: '', time: '' },
+    { date: '', time: '' },
+    { date: '', time: '' },
+  ])
+  const [reschedules, setReschedules] = useState<RescheduleEntry[]>([])
+  const [respondingId, setRespondingId] = useState<number | null>(null)
+  const [agreements, setAgreements] = useState<AgreementRecord[]>([])
 
   const [resultComment, setResultComment] = useState('')
   const [resultSubmitting, setResultSubmitting] = useState(false)
   const [resultsConfirmOpen, setResultsConfirmOpen] = useState(false)
 
+  // The date+time inputs are wall clock; the API takes RFC3339. Tagging them as
+  // UTC keeps the digits the employer typed intact end to end (see formatSlot).
+  const filledOfferSlots = offerSlots
+    .filter((s) => s.date && s.time)
+    .map((s) => `${s.date}T${s.time}:00Z`)
+
   async function load() {
     if (!token) return
     setLoading(true)
     try {
-      const [apps, ivs] = await Promise.all([listEmployerApplications(token), listMyInterviews(token)])
+      const [apps, ivs, agrs] = await Promise.all([listEmployerApplications(token), listMyInterviews(token), listMyAgreements(token)])
       setApplications(apps.filter((a) => a.status === 'accepted'))
       setInterviews(ivs)
+      setAgreements(agrs)
     } catch (err) {
       setError(apiErrorMessage(err, 'โหลดข้อมูลผู้สมัครไม่สำเร็จ'))
     } finally {
@@ -413,10 +648,11 @@ function EmployerInterviewsView() {
     async function doLoad() {
       setLoading(true)
       try {
-        const [apps, ivs] = await Promise.all([listEmployerApplications(token!), listMyInterviews(token!)])
+        const [apps, ivs, agrs] = await Promise.all([listEmployerApplications(token!), listMyInterviews(token!), listMyAgreements(token!)])
         if (cancelled) return
         setApplications(apps.filter((a) => a.status === 'accepted'))
         setInterviews(ivs)
+        setAgreements(agrs)
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลผู้สมัครไม่สำเร็จ'))
       } finally {
@@ -433,11 +669,64 @@ function EmployerInterviewsView() {
     return interviews.find((iv) => iv.application_id === applicationId) ?? null
   }
 
-  const notScheduled = applications.filter((a) => !interviewFor(a.id))
-  const scheduled = applications.filter((a) => interviewFor(a.id))
+  // Once a position reaches the agreement stage its interview work is over —
+  // hired, declined, or waiting on the student, there is nothing left to schedule
+  // or announce here. It closes that position only: other positions the same
+  // candidate applied for are separate decisions and stay open. Deleting the
+  // agreement in "ตกลงการจ้างงาน > ประวัติย้อนหลัง" reopens the position.
+  const settledApplicationIds = new Set(
+    agreements
+      .map((a) => interviews.find((i) => i.id === a.interview_schedule_id)?.application_id)
+      .filter((id): id is number => id != null),
+  )
+  const inPlay = applications.filter((a) => !settledApplicationIds.has(a.id))
+  const settledCount = applications.length - inPlay.length
+
+  const notScheduled = inPlay.filter((a) => !interviewFor(a.id))
+  const scheduled = inPlay.filter((a) => interviewFor(a.id))
 
   const selectedApplication = applications.find((a) => a.id === selectedApplicationId) ?? null
   const selectedInterview = selectedApplicationId ? interviewFor(selectedApplicationId) : null
+  const selectedInterviewId = selectedInterview?.id ?? null
+
+  // Reschedule requests belong to one appointment, so they are fetched when a
+  // candidate is picked rather than up front for every interview.
+  useEffect(() => {
+    let cancelled = false
+    async function loadReschedules() {
+      if (!token || !selectedInterviewId) {
+        if (!cancelled) setReschedules([])
+        return
+      }
+      try {
+        const rs = await listReschedules(token, selectedInterviewId)
+        if (!cancelled) setReschedules(rs)
+      } catch {
+        if (!cancelled) setReschedules([])
+      }
+    }
+    void loadReschedules()
+    return () => { cancelled = true }
+  }, [token, selectedInterviewId, interviews])
+
+  const pendingStudentRequest = reschedules.find((r) => r.status === 'pending' && r.requested_by === 'student') ?? null
+  const pendingOwnOffer = reschedules.find((r) => r.status === 'pending' && r.requested_by === 'employer') ?? null
+
+  async function respondToReschedule(rescheduleId: number, approve: boolean) {
+    if (!token) return
+    setRespondingId(rescheduleId)
+    try {
+      if (approve) await approveReschedule(token, rescheduleId)
+      else await rejectReschedule(token, rescheduleId)
+      await load()
+      const rs = await listReschedules(token, selectedInterviewId!)
+      setReschedules(rs)
+    } catch (err) {
+      setError(apiErrorMessage(err, approve ? 'อนุมัติไม่สำเร็จ' : 'ปฏิเสธไม่สำเร็จ'))
+    } finally {
+      setRespondingId(null)
+    }
+  }
 
   function pick(applicationId: number) {
     setSelectedApplicationId(applicationId)
@@ -490,8 +779,12 @@ function EmployerInterviewsView() {
     if (!token || !selectedInterview) return
     setRescheduleSubmitting(true)
     try {
-      await requestReschedule(token, selectedInterview.id, { reason: rescheduleNote })
+      await requestReschedule(token, selectedInterview.id, {
+        reason: rescheduleNote,
+        proposed_slots: filledOfferSlots,
+      })
       setRescheduleConfirmOpen(true)
+      await load()
     } catch (err) {
       setError(apiErrorMessage(err, 'ส่งคำขอเปลี่ยนกำหนดการไม่สำเร็จ'))
     } finally {
@@ -501,9 +794,20 @@ function EmployerInterviewsView() {
 
   async function submitResult(result: 'passed' | 'failed') {
     if (!token || !selectedInterview) return
+    // A result is announced once. Guarding here as well as on the hub row keeps a
+    // double click, or a stale screen, from firing a second submit.
+    if (selectedInterview.result !== '') {
+      setError('ประกาศผลการสัมภาษณ์ของผู้สมัครคนนี้ไปแล้ว')
+      setSubview('hub')
+      return
+    }
     setResultSubmitting(true)
     try {
       await sendInterviewResult(token, selectedInterview.id, { result, comment: resultComment })
+      // Refetch so the announced result lands in state — without it the hub still
+      // thinks nothing was announced and leaves the actions open for a second
+      // submit, which the API then rejects.
+      await load()
       setResultsConfirmOpen(true)
     } catch (err) {
       setError(apiErrorMessage(err, 'ส่งผลการสัมภาษณ์ไม่สำเร็จ'))
@@ -560,9 +864,16 @@ function EmployerInterviewsView() {
         <Typography sx={{ fontSize: 14, color: '#697077', mb: 2 }}>
           เลือกผู้สมัคร 1 คนก่อน — ระบบนัดสัมภาษณ์ และระบบตกลงการจ้างงานจะเปิดใช้งานหลังเลือก
         </Typography>
-        <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, mb: 3 }}>
+        <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, mb: settledCount > 0 ? 1.5 : 3 }}>
           👋 รายชื่อด้านล่างมาจากใบสมัครที่คุณตอบรับแล้ว (ตรวจสอบใบสมัครได้ที่เมนู &quot;ผู้สมัครงาน&quot;)
         </Box>
+        {settledCount > 0 && (
+          <Box sx={{ bgcolor: '#F7F9FC', border: `1px solid ${colors.border}`, color: '#52545C', fontSize: 13, borderRadius: 2, p: 1.5, mb: 3 }}>
+            มี {settledCount} ตำแหน่งที่ไม่แสดง เพราะเข้าสู่ขั้นตอนข้อตกลงการจ้างงานแล้ว (จ้างงานสำเร็จ
+            รอนักศึกษาตอบรับ หรือถูกปฏิเสธ) — ดูสถานะได้ที่เมนู &quot;ตกลงการจ้างงาน&quot;
+            ส่วนตำแหน่งอื่นที่ผู้สมัครยื่นไว้ยังดำเนินการต่อได้ตามปกติ
+          </Box>
+        )}
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -624,21 +935,39 @@ function EmployerInterviewsView() {
         </Typography>
         {HubHeader}
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
-          <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5 }}>
+          {/* Once the result is announced this stage is over: the appointment can't
+              be re-timed, re-announced, or moved, so the whole card is closed off
+              rather than leaving live-looking buttons that the API would reject. */}
+          <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5, bgcolor: announced ? '#FAFAFA' : 'transparent', opacity: announced ? 0.72 : 1 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Box sx={{ width: 36, height: 36, borderRadius: 2, bgcolor: colors.navy, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>1</Box>
+                <Box sx={{ width: 36, height: 36, borderRadius: 2, bgcolor: announced ? '#E0E0E0' : colors.navy, color: announced ? '#9AA0A6' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>1</Box>
                 <Box>
                   <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>จัดการนัดหมายสัมภาษณ์</Typography>
-                  <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>กำหนดนัด ยืนยัน เลื่อน และแจ้งผลการพิจารณา</Typography>
+                  <Typography sx={{ fontSize: 12, color: '#9AA0A6' }}>
+                    {announced ? 'ประกาศผลแล้ว — แก้ไขนัดหมายไม่ได้อีก' : 'กำหนดนัด ยืนยัน เลื่อน และแจ้งผลการพิจารณา'}
+                  </Typography>
                 </Box>
               </Box>
-              <Chip label="พร้อมใช้งาน" size="small" sx={{ bgcolor: '#EAF7EA', color: colors.ok, fontWeight: 600 }} />
+              <Chip
+                icon={announced ? <LockOutlinedIcon sx={{ fontSize: 14 }} /> : undefined}
+                label={announced ? 'เสร็จสิ้นแล้ว' : 'พร้อมใช้งาน'}
+                size="small"
+                sx={{ bgcolor: announced ? '#F0F0F0' : '#EAF7EA', color: announced ? '#697077' : colors.ok, fontWeight: 600 }}
+              />
             </Box>
+            {announced && (
+              <Box sx={{ bgcolor: '#F0F0F0', color: '#52545C', fontSize: 13, borderRadius: 2, p: 1.5, mb: 1.5 }}>
+                การสัมภาษณ์ของผู้สมัครคนนี้เสร็จสิ้นแล้ว ดูย้อนหลังได้ที่ &quot;รายละเอียดนัดหมาย&quot;
+              </Box>
+            )}
             {[
               { icon: <EventOutlinedIcon fontSize="small" />, label: selectedInterview ? 'แก้ไขนัดหมายสัมภาษณ์' : 'กำหนดนัดหมายสัมภาษณ์', action: openSchedule, disabled: announced },
+              // Viewing the finished appointment changes nothing, so it stays open.
               { icon: <VisibilityOutlinedIcon fontSize="small" />, label: 'รายละเอียดนัดหมาย', action: () => setSubview('detail'), disabled: !selectedInterview },
               { icon: <AutorenewOutlinedIcon fontSize="small" />, label: 'ขอเปลี่ยน / เลื่อนกำหนดการ', action: () => setSubview('reschedule'), disabled: !selectedInterview || announced },
+              // Notifications is a page of its own, reachable from the sidebar
+              // anyway — locking it here would be friction with no effect.
               { icon: <NotificationsNoneOutlinedIcon fontSize="small" />, label: 'การแจ้งเตือน', action: () => navigate('/notifications') },
               { icon: <CampaignOutlinedIcon fontSize="small" />, label: 'แจ้งผลการพิจารณาการสัมภาษณ์', action: () => setSubview('results'), disabled: !selectedInterview || announced },
             ].map((row) => (
@@ -798,34 +1127,110 @@ function EmployerInterviewsView() {
       <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
         {BackToHub}
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>ขอเปลี่ยน / เลื่อนกำหนดการ</Typography>
-        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>เสนอกำหนดการสอบถามสำหรับนัดหมายที่ยืนยันแล้ว ระบบจะบันทึกประวัติทุกครั้ง</Typography>
-        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3, maxWidth: 600 }}>
+        <Typography sx={{ fontSize: 14, color: '#697077', mb: 3 }}>เสนอวันที่ว่างให้นักศึกษาเลือก หรือตอบคำขอเลื่อนนัดที่นักศึกษาส่งมา</Typography>
+
+        {/* A student's request is waiting for a decision — answer it before
+            offering new times, since only one request may be open at a time. */}
+        {pendingStudentRequest && (
+          <Box sx={{ border: '1px solid #FDBA74', bgcolor: '#FFF7ED', borderRadius: 3, p: 3, mb: 3, maxWidth: 600 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 17, color: '#9A3412' }}>นักศึกษาขอเลื่อนนัด — รอคุณอนุมัติ</Typography>
+            <Typography sx={{ fontSize: 15, color: colors.navy, mt: 1.5 }}>
+              ขอเลื่อนเป็นวันที่ <b>{formatSlot(pendingStudentRequest.student_available_date_time)}</b>
+            </Typography>
+            {pendingStudentRequest.reschedule_reason && (
+              <Typography sx={{ fontSize: 13, color: '#7C2D12', mt: 0.5 }}>เหตุผล: {pendingStudentRequest.reschedule_reason}</Typography>
+            )}
+            <Typography sx={{ fontSize: 12, color: '#9A7B2F', mt: 1.5 }}>
+              ถ้าอนุมัติ นัดจะถูกเปลี่ยนเป็นวันดังกล่าวทันที ถ้าไม่อนุมัติ กำหนดการเดิมยังมีผลอยู่
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1.5, mt: 2.5 }}>
+              <Button
+                variant="contained"
+                disabled={respondingId === pendingStudentRequest.id}
+                onClick={() => void respondToReschedule(pendingStudentRequest.id, true)}
+                sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, px: 3, bgcolor: '#217829', '&:hover': { bgcolor: '#1B5F21' } }}
+              >
+                อนุมัติการเลื่อนนัด
+              </Button>
+              <Button
+                variant="outlined"
+                disabled={respondingId === pendingStudentRequest.id}
+                onClick={() => void respondToReschedule(pendingStudentRequest.id, false)}
+                sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, px: 3, color: '#DA1E28', borderColor: '#DA1E28' }}
+              >
+                ไม่อนุมัติ
+              </Button>
+            </Box>
+          </Box>
+        )}
+
+        {/* Already waiting on the student to pick — show what was offered. */}
+        {pendingOwnOffer && (
+          <Box sx={{ border: `1px solid ${colors.border}`, bgcolor: '#F7F9FC', borderRadius: 3, p: 3, mb: 3, maxWidth: 600 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>ส่งวันให้นักศึกษาเลือกแล้ว — รอนักศึกษาตอบกลับ</Typography>
+            <Box component="ul" sx={{ m: 0, mt: 1, pl: 2.5 }}>
+              {pendingOwnOffer.proposed_slots.map((s) => (
+                <Typography component="li" key={s} sx={{ fontSize: 14, color: '#333' }}>{formatSlot(s)}</Typography>
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3, maxWidth: 600, opacity: pendingStudentRequest || pendingOwnOffer ? 0.5 : 1, pointerEvents: pendingStudentRequest || pendingOwnOffer ? 'none' : 'auto' }}>
           <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>เสนอการขอเปลี่ยน / เลื่อนวันเวลา</Typography>
           <Typography sx={{ fontSize: 13, color: '#697077', mb: 0.5 }}>นัดหมายที่ต้องการเปลี่ยน</Typography>
           <TextField value={`IV-${String(selectedInterview.id).padStart(4, '0')} • ${selectedApplication.position} • ${selectedInterview.appointment_date} ${selectedInterview.appointment_time}`} fullWidth disabled sx={{ mb: 2 }} />
           <TextField
-            label="ทำการสอบถามจากนักศึกษาวันที่ว่าง"
+            label="เหตุผลที่ขอเลื่อน"
             value={rescheduleNote}
             onChange={(e) => setRescheduleNote(e.target.value)}
-            placeholder="บอกรายละเอียดสอบถามนักศึกษาวันที่ว่างตามรายละเอียดตามที่ต้องการจะรู้"
+            placeholder="เช่น ผู้สัมภาษณ์ติดประชุมด่วน"
             fullWidth
             multiline
-            minRows={4}
-            sx={{ mb: 2 }}
+            minRows={2}
+            sx={{ mb: 2.5 }}
           />
-          <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, mb: 2 }}>
-            เมื่อส่งคำขอ ระบบจะแจ้งอีกฝ่ายให้ตรวจสอบและยืนยันรับทราบกำหนดการใหม่
+
+          {/* Offering concrete times instead of asking an open question: the
+              student picks one and the appointment is settled in a single step,
+              with no second round of approval. */}
+          <Typography sx={{ fontWeight: 700, fontSize: 15, color: colors.navy, mb: 0.5 }}>เสนอวันที่ว่างให้นักศึกษาเลือก</Typography>
+          <Typography sx={{ fontSize: 13, color: '#697077', mb: 1.5 }}>
+            กรอกอย่างน้อย 1 ช่วง (แนะนำ 3 ช่วง) — นักศึกษาจะเลือกได้เพียงวันเดียวจากที่คุณเสนอ และนัดจะถูกเปลี่ยนทันที
+          </Typography>
+          {offerSlots.map((slot, i) => (
+            <Box key={i} sx={{ display: 'flex', gap: 1.5, mb: 1.5, alignItems: 'center' }}>
+              <Typography sx={{ fontSize: 13, color: '#697077', width: 60, flexShrink: 0 }}>ตัวเลือก {i + 1}</Typography>
+              <TextField
+                type="date"
+                value={slot.date}
+                onChange={(e) => setOfferSlots(offerSlots.map((s, j) => (j === i ? { ...s, date: e.target.value } : s)))}
+                fullWidth
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+              <TextField
+                type="time"
+                value={slot.time}
+                onChange={(e) => setOfferSlots(offerSlots.map((s, j) => (j === i ? { ...s, time: e.target.value } : s)))}
+                fullWidth
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+            </Box>
+          ))}
+
+          <Box sx={{ bgcolor: '#EFF6FF', color: '#045BE4', fontSize: 13, borderRadius: 2, p: 1.5, my: 2 }}>
+            นักศึกษาจะได้รับการแจ้งเตือน และเลือกวันได้จากในกล่องการแจ้งเตือนทันที
           </Box>
           <Box sx={{ display: 'flex', gap: 1.5 }}>
             <Button onClick={() => setSubview('hub')} sx={{ borderRadius: '20px', textTransform: 'none', border: `1px solid ${colors.border}`, color: colors.navy, px: 2.5 }}>ยกเลิก</Button>
             <Button
               fullWidth
               variant="contained"
-              disabled={rescheduleNote.trim().length === 0 || rescheduleSubmitting}
+              disabled={filledOfferSlots.length === 0 || rescheduleNote.trim().length === 0 || rescheduleSubmitting}
               onClick={submitReschedule}
               sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
             >
-              {rescheduleSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอเปลี่ยนกำหนดการ'}
+              {rescheduleSubmitting ? 'กำลังส่ง...' : `ส่งให้นักศึกษาเลือก (${filledOfferSlots.length} วัน)`}
             </Button>
           </Box>
         </Box>

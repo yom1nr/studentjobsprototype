@@ -116,11 +116,13 @@ func (h *NotificationController) MarkAllRead(c *gin.Context) {
 
 func mapNotificationToResponse(n *models.Notification) dto.NotificationResponse {
     return dto.NotificationResponse{
-        ID:               n.NotificationID,
-        Title:            n.Title,
-        NotificationType: n.NotificationType,
-        Message:          n.Message,
-        IsRead:           n.IsRead,
-        CreatedAt:        n.CreatedAt.Format(time.RFC3339),
+        ID:                    n.NotificationID,
+        Title:                 n.Title,
+        NotificationType:      n.NotificationType,
+        Message:               n.Message,
+        IsRead:                n.IsRead,
+        CreatedAt:             n.CreatedAt.Format(time.RFC3339),
+        InterviewScheduleID:   n.InterviewScheduleID,
+        RescheduleInterviewID: n.RescheduleInterviewID,
     }
 }

@@ -91,12 +91,19 @@ func SetupRouter(
     employer.POST("/interviews", approvedEmployer, interviewHandler.CreateInterview)
     employer.PUT("/interviews/:id", approvedEmployer, interviewHandler.UpdateInterview)
     employer.POST("/interviews/:id/result", approvedEmployer, interviewHandler.SendResult)
+    // Employer answers a student's request to move the appointment. Same
+    // approved-employer gate as the rest of the hiring flow.
+    employer.POST("/reschedules/:id/approve", approvedEmployer, interviewHandler.ApproveReschedule)
+    employer.POST("/reschedules/:id/reject", approvedEmployer, interviewHandler.RejectReschedule)
 
     // Employer: employment agreements (B6733827 subsystem 2)
     employer.POST("/agreements", approvedEmployer, employmentHandler.CreateAgreement)
+    employer.DELETE("/agreements/:id", approvedEmployer, employmentHandler.DeleteAgreement)
 
     // Student: confirm interview attendance / respond to reschedule requests
     student.POST("/interviews/:id/confirm", interviewHandler.ConfirmAttendance)
+    // Student picks one of the times the employer offered.
+    student.POST("/reschedules/:id/select", interviewHandler.SelectRescheduleSlot)
 
     // Student: respond to an employment agreement
     student.POST("/agreements/:id/accept", employmentHandler.Accept)

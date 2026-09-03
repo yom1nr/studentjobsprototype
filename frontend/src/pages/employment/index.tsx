@@ -5,16 +5,17 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlin
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import MailOutlineIcon from '@mui/icons-material/MailOutlineOutlined'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import { useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { ApiError } from '../../services/https'
 import { listEmployerApplications } from '../../services/https/applications'
-import { acceptAgreement, createAgreement, listMyAgreements, rejectAgreement } from '../../services/https/agreements'
+import { acceptAgreement, createAgreement, deleteAgreement, listMyAgreements, rejectAgreement } from '../../services/https/agreements'
 import { listMyInterviews } from '../../services/https/interviews'
 import type { Application } from '../../interface/IJobInterface'
-import type { AgreementRecord } from '../../interface/IInterviewInterface'
+import type { AgreementRecord, InterviewScheduleRecord } from '../../interface/IInterviewInterface'
 
 const colors = { navy: '#012150', border: '#DDE1E6' }
 
@@ -212,10 +213,21 @@ function StudentEmploymentView() {
               </Box>
             )}
 
-            {agreement.status !== 'pending' && (
-              <Typography sx={{ fontSize: 13, color: '#697077' }}>
-                คุณได้{agreement.status === 'accepted' ? 'ตอบรับ' : 'ปฏิเสธ'}ข้อตกลงนี้แล้ว
-              </Typography>
+            {agreement.status === 'accepted' && (
+              <Box sx={{ bgcolor: '#EAF7EA', color: '#217829', fontSize: 13, borderRadius: 2, p: 1.5 }}>
+                คุณตอบรับข้อตกลงนี้แล้ว — มีผลบังคับตั้งแต่ {agreement.start_date}
+              </Box>
+            )}
+            {/* Show the student the reason they gave, so the record of their own
+                decision is visible to them too, not only to the employer. */}
+            {agreement.status === 'rejected' && (
+              <Box sx={{ bgcolor: '#FDEAEA', borderRadius: 2, p: 1.5 }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#B3261E' }}>คุณปฏิเสธข้อตกลงนี้แล้ว</Typography>
+                <Typography sx={{ fontSize: 12, color: '#8A3A36', mt: 0.5 }}>เหตุผลที่คุณระบุไว้</Typography>
+                <Typography sx={{ fontSize: 14, color: '#52545C', whiteSpace: 'pre-wrap' }}>
+                  {agreement.reject_reason || 'ไม่ได้ระบุเหตุผล'}
+                </Typography>
+              </Box>
             )}
           </Box>
 
@@ -279,15 +291,21 @@ function EmployerEmploymentView() {
 
   const [tab, setTab] = useState<AgreementTab>('create')
   const [applications, setApplications] = useState<Application[]>([])
-  const [passedStudentIds, setPassedStudentIds] = useState<Set<number>>(new Set())
+  const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
+  const [loadedAt, setLoadedAt] = useState(() => Date.now())
   const [agreements, setAgreements] = useState<AgreementRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [selectedAgreementId, setSelectedAgreementId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<AgreementRecord | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
-  const [studentId, setStudentId] = useState<number | ''>('')
+  // Keyed on the interview, not the student: a candidate who passed for two
+  // positions needs a separate contract for each, and the interview is what
+  // carries the position.
+  const [interviewId, setInterviewId] = useState<number | ''>('')
   const [startDate, setStartDate] = useState('')
   const [durationMonths, setDurationMonths] = useState(4)
   const [wageRate, setWageRate] = useState(60)
@@ -299,10 +317,11 @@ function EmployerEmploymentView() {
     if (!token) return
     setLoading(true)
     try {
-      const [apps, agrs, interviews] = await Promise.all([listEmployerApplications(token), listMyAgreements(token), listMyInterviews(token)])
+      const [apps, agrs, ivs] = await Promise.all([listEmployerApplications(token), listMyAgreements(token), listMyInterviews(token)])
       setApplications(apps.filter((a) => a.status === 'accepted'))
       setAgreements(agrs)
-      setPassedStudentIds(new Set(interviews.filter((i) => i.result === 'passed').map((i) => i.student_id)))
+      setInterviews(ivs)
+      setLoadedAt(Date.now())
     } catch (err) {
       setError(apiErrorMessage(err, 'โหลดข้อมูลไม่สำเร็จ'))
     } finally {
@@ -316,11 +335,12 @@ function EmployerEmploymentView() {
     async function doLoad() {
       setLoading(true)
       try {
-        const [apps, agrs, interviews] = await Promise.all([listEmployerApplications(token!), listMyAgreements(token!), listMyInterviews(token!)])
+        const [apps, agrs, ivs] = await Promise.all([listEmployerApplications(token!), listMyAgreements(token!), listMyInterviews(token!)])
         if (cancelled) return
         setApplications(apps.filter((a) => a.status === 'accepted'))
         setAgreements(agrs)
-        setPassedStudentIds(new Set(interviews.filter((i) => i.result === 'passed').map((i) => i.student_id)))
+        setInterviews(ivs)
+        setLoadedAt(Date.now())
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลไม่สำเร็จ'))
       } finally {
@@ -331,20 +351,70 @@ function EmployerEmploymentView() {
     return () => { cancelled = true }
   }, [token])
 
-  const agreedStudentIds = new Set(agreements.map((a) => a.student_id))
-  // An agreement covers the student, not one application, so a candidate holding
-  // several accepted applications must still appear once in the list.
-  const eligibleCandidates = applications
-    .filter((a) => passedStudentIds.has(a.student_id) && !agreedStudentIds.has(a.student_id))
-    .filter((a, i, all) => all.findIndex((other) => other.student_id === a.student_id) === i)
-  const selectedCandidate = applications.find((a) => a.student_id === studentId) ?? null
+  // A student works under one contract with this employer at a time, so anyone
+  // whose contract is still running is not offered again. A contract with no
+  // computable end counts as running — mirroring the API's rule so the form never
+  // offers a candidate the API would then refuse.
+  // loadedAt is stamped when the data arrives rather than read during render:
+  // reading the clock while rendering makes the output depend on when React
+  // happens to render, which is exactly what react-hooks/purity forbids.
+  const contractedStudentIds = new Set(
+    agreements
+      .filter((a) => {
+        if (a.status === 'rejected') return false
+        if (a.status === 'pending') return true
+        if (!a.start_date || a.duration_months <= 0) return true
+        const end = new Date(a.start_date)
+        end.setMonth(end.getMonth() + a.duration_months)
+        return end.getTime() > loadedAt
+      })
+      .map((a) => a.student_id),
+  )
+  // An interview that already produced an offer is finished with, whatever the
+  // student answered — accepting it made a contract, declining it settled the
+  // matter. Deleting the declined record in the history tab puts the candidate
+  // back on this list.
+  const offeredInterviewIds = new Set(agreements.map((a) => a.interview_schedule_id))
+
+  const passedInterviews = interviews.filter((i) => i.result === 'passed')
+  const eligibleInterviews = passedInterviews.filter(
+    (i) => !offeredInterviewIds.has(i.id) && !contractedStudentIds.has(i.student_id),
+  )
+  const declinedCount = passedInterviews.filter((i) => {
+    const a = agreements.find((x) => x.interview_schedule_id === i.id)
+    return a?.status === 'rejected'
+  }).length
+  const blockedByContract = passedInterviews.filter((i) => contractedStudentIds.has(i.student_id)).length
+
+  /** The position an interview is for, read through the application it belongs to. */
+  function positionFor(iv: InterviewScheduleRecord): string {
+    return applications.find((a) => a.id === iv.application_id)?.position ?? 'ไม่ระบุตำแหน่ง'
+  }
+
+  const selectedInterview = passedInterviews.find((i) => i.id === interviewId) ?? null
+
+  async function handleDelete() {
+    if (!token || !deleteTarget) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteAgreement(token, deleteTarget.id)
+      setDeleteTarget(null)
+      await load()
+    } catch (err) {
+      setError(apiErrorMessage(err, 'ลบข้อตกลงไม่สำเร็จ'))
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   async function send() {
-    if (!token || !studentId) return
+    if (!token || !interviewId) return
     setSubmitting(true)
     try {
       await createAgreement(token, {
-        student_id: studentId,
+        interview_id: interviewId,
         start_date: startDate,
         wage_rate: wageRate,
         duration_months: durationMonths,
@@ -365,7 +435,13 @@ function EmployerEmploymentView() {
     return <Box sx={{ maxWidth: 1100, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
   }
 
-  const selectedAgreement = agreements.find((a) => a.id === selectedAgreementId) ?? agreements[0] ?? null
+  // This is the details tab, so every agreement is listed whatever the outcome —
+  // a declined one still has to show the terms that were offered and the reason
+  // it was turned down. Ordering puts the ones still needing an answer first.
+  const statusOrder: Record<AgreementRecord['status'], number> = { pending: 0, accepted: 1, rejected: 2 }
+  const listedAgreements = [...agreements].sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
+  const selectedAgreement =
+    listedAgreements.find((a) => a.id === selectedAgreementId) ?? listedAgreements[0] ?? null
 
   return (
     <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
@@ -386,20 +462,24 @@ function EmployerEmploymentView() {
             <Typography sx={{ fontSize: 13, color: '#697077', mb: 0.5 }}>เลือกนักศึกษา</Typography>
             <TextField
               select
-              value={studentId}
-              onChange={(e) => setStudentId(Number(e.target.value))}
+              value={interviewId}
+              onChange={(e) => setInterviewId(Number(e.target.value))}
               fullWidth
               sx={{ mb: 2 }}
               slotProps={{ select: { displayEmpty: true } }}
             >
               <MenuItem value="" disabled>— เลือกผู้สมัครที่ผ่านการสัมภาษณ์ —</MenuItem>
-              {eligibleCandidates.map((a) => (
-                <MenuItem key={a.student_id} value={a.student_id}>{a.student_name} — {a.position}</MenuItem>
+              {eligibleInterviews.map((iv) => (
+                <MenuItem key={iv.id} value={iv.id}>{iv.student_name} — {positionFor(iv)}</MenuItem>
               ))}
             </TextField>
-            {eligibleCandidates.length === 0 && (
+            {eligibleInterviews.length === 0 && (
               <Typography sx={{ fontSize: 12, color: '#9AA0A6', mt: -1.5, mb: 2 }}>
-                ยังไม่มีผู้สมัครที่พร้อมทำสัญญา — ต้องนัดสัมภาษณ์และประกาศผล &quot;ผ่าน&quot; ที่เมนู &quot;จัดการนัดหมายสัมภาษณ์&quot; ก่อน
+                {declinedCount > 0
+                  ? `ผู้ที่ผ่านสัมภาษณ์ปฏิเสธข้อตกลงไปแล้ว (${declinedCount} คน) — หากต้องการเสนอใหม่ ให้ลบข้อตกลงที่ถูกปฏิเสธออกก่อนที่แท็บ "ประวัติย้อนหลัง"`
+                  : blockedByContract > 0
+                    ? `ผู้ที่ผ่านสัมภาษณ์ทั้งหมด (${blockedByContract} คน) มีสัญญาจ้างงานกับคุณอยู่แล้ว — ทำสัญญาใหม่ได้เมื่อสัญญาเดิมหมดอายุ`
+                    : 'ยังไม่มีผู้สมัครที่พร้อมทำสัญญา — ต้องนัดสัมภาษณ์และประกาศผล "ผ่าน" ที่เมนู "จัดการนัดหมายสัมภาษณ์" ก่อน'}
               </Typography>
             )}
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
@@ -425,7 +505,9 @@ function EmployerEmploymentView() {
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
             <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy, mb: 2 }}>ตัวอย่างข้อตกลง</Typography>
             <Typography sx={{ fontSize: 12, color: '#697077' }}>คู่สัญญา</Typography>
-            <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1.5 }}>{selectedCandidate ? selectedCandidate.student_name : '-'}</Typography>
+            <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1.5 }}>
+              {selectedInterview ? `${selectedInterview.student_name} — ${positionFor(selectedInterview)}` : '-'}
+            </Typography>
             <Typography sx={{ fontSize: 12, color: '#697077' }}>เริ่มงาน-ระยะเวลา</Typography>
             <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1.5 }}>{startDate || '-'} • {durationMonths} เดือน</Typography>
             <Typography sx={{ fontSize: 12, color: '#697077' }}>ค่าตอบแทน</Typography>
@@ -436,7 +518,7 @@ function EmployerEmploymentView() {
             <Button
               fullWidth
               variant="contained"
-              disabled={!studentId || !startDate || !workingHours || submitting}
+              disabled={!interviewId || !startDate || !workingHours || submitting}
               onClick={send}
               sx={{ borderRadius: '20px', textTransform: 'none', fontWeight: 600, bgcolor: '#0090FF', '&:hover': { bgcolor: '#0070D6' } }}
             >
@@ -449,7 +531,7 @@ function EmployerEmploymentView() {
       {tab === 'status' && (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1.4fr' }, gap: 3, alignItems: 'start' }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
-            {agreements.map((a, index) => (
+            {listedAgreements.map((a, index) => (
               <Box
                 key={a.id}
                 onClick={() => setSelectedAgreementId(a.id)}
@@ -462,7 +544,9 @@ function EmployerEmploymentView() {
                 <Chip label={statusChipMap[a.status].label} size="small" sx={{ bgcolor: statusChipMap[a.status].bg, color: statusChipMap[a.status].color, fontWeight: 600 }} />
               </Box>
             ))}
-            {agreements.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 3 }}>ยังไม่มีข้อตกลงที่สร้าง</Typography>}
+            {listedAgreements.length === 0 && (
+              <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 3 }}>ยังไม่มีข้อตกลงที่สร้าง</Typography>
+            )}
           </Box>
           {selectedAgreement && (
             <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
@@ -473,11 +557,55 @@ function EmployerEmploymentView() {
                 </Box>
                 <Chip label={statusChipMap[selectedAgreement.status].label} size="small" sx={{ bgcolor: statusChipMap[selectedAgreement.status].bg, color: statusChipMap[selectedAgreement.status].color, fontWeight: 600 }} />
               </Box>
-              {selectedAgreement.status === 'pending' && <Typography sx={{ fontSize: 13, color: '#697077' }}>ส่งให้นักศึกษาแล้ว กำลังรอนักศึกษาตอบรับหรือปฏิเสธ</Typography>}
-              {selectedAgreement.status === 'accepted' && <Typography sx={{ fontSize: 13, color: colors.navy }}>นักศึกษาตอบรับข้อตกลงแล้ว — มีผลบังคับตั้งแต่ {selectedAgreement.start_date}</Typography>}
-              {selectedAgreement.status === 'rejected' && (
-                <Typography sx={{ fontSize: 13, color: '#DA1E28' }}>นักศึกษาปฏิเสธข้อตกลงนี้{selectedAgreement.reject_reason ? `: ${selectedAgreement.reject_reason}` : ''}</Typography>
+              {/* The outcome line first, then the terms it applies to — a declined
+                  offer is only meaningful next to what was actually offered. */}
+              {selectedAgreement.status === 'pending' && (
+                <Box sx={{ bgcolor: '#FFF6E0', color: '#8A6A1B', fontSize: 13, borderRadius: 2, p: 1.5 }}>
+                  ส่งให้นักศึกษาแล้ว กำลังรอนักศึกษาตอบรับหรือปฏิเสธ
+                </Box>
               )}
+              {selectedAgreement.status === 'accepted' && (
+                <Box sx={{ bgcolor: '#EAF7EA', color: '#217829', fontSize: 13, borderRadius: 2, p: 1.5 }}>
+                  นักศึกษาตอบรับข้อตกลงแล้ว — มีผลบังคับตั้งแต่ {selectedAgreement.start_date}
+                </Box>
+              )}
+              {selectedAgreement.status === 'rejected' && (
+                <Box sx={{ bgcolor: '#FDEAEA', borderRadius: 2, p: 1.5 }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#B3261E' }}>นักศึกษาปฏิเสธข้อตกลงนี้</Typography>
+                  <Typography sx={{ fontSize: 12, color: '#8A3A36', mt: 0.5 }}>เหตุผลที่ปฏิเสธ</Typography>
+                  <Typography sx={{ fontSize: 14, color: '#52545C', whiteSpace: 'pre-wrap' }}>
+                    {selectedAgreement.reject_reason || 'ไม่ได้ระบุเหตุผล'}
+                  </Typography>
+                </Box>
+              )}
+
+              <Typography sx={{ fontWeight: 700, fontSize: 14, color: colors.navy, mt: 2.5, mb: 1 }}>เงื่อนไขที่เสนอไป</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, borderTop: `1px solid ${colors.border}`, pt: 2 }}>
+                <Box>
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>วันเริ่มงาน</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{selectedAgreement.start_date || '-'}</Typography>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>ระยะเวลา</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{selectedAgreement.duration_months} เดือน</Typography>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>อัตราค่าตอบแทน</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{selectedAgreement.wage_rate} บาท / ชั่วโมง</Typography>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>ชั่วโมงการทำงาน</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{selectedAgreement.working_hours || '-'}</Typography>
+                </Box>
+                <Box sx={{ gridColumn: '1 / -1' }}>
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>เงื่อนไขการลางาน</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{selectedAgreement.leave_policy || '-'}</Typography>
+                </Box>
+                <Box sx={{ gridColumn: '1 / -1' }}>
+                  <Typography sx={{ fontSize: 12, color: '#697077' }}>ข้อกำหนดอื่น ๆ</Typography>
+                  <Typography sx={{ fontWeight: 600, fontSize: 14, whiteSpace: 'pre-wrap' }}>{selectedAgreement.additional_terms || '-'}</Typography>
+                </Box>
+              </Box>
             </Box>
           )}
         </Box>
@@ -485,23 +613,57 @@ function EmployerEmploymentView() {
 
       {tab === 'history' && (
         <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr 1.6fr 1fr 1.2fr', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
-            {['เลขที่', 'รายการ', 'คู่สัญญา', 'วันที่', 'สถานะ'].map((h) => (
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr 1.6fr 1fr 1.2fr 60px', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
+            {['เลขที่', 'รายการ', 'คู่สัญญา', 'วันที่', 'สถานะ', ''].map((h) => (
               <Typography key={h} sx={{ fontSize: 12, fontWeight: 700, color: '#697077' }}>{h}</Typography>
             ))}
           </Box>
           {agreements.map((r, index) => (
-            <Box key={r.id} sx={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr 1.6fr 1fr 1.2fr', alignItems: 'center', px: 2.5, py: 1.5, borderTop: index > 0 ? `1px solid ${colors.border}` : 'none' }}>
+            <Box key={r.id} sx={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr 1.6fr 1fr 1.2fr 60px', alignItems: 'center', px: 2.5, py: 1.5, borderTop: index > 0 ? `1px solid ${colors.border}` : 'none' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 13, color: colors.navy }}>{agreementCode(r.id)}</Typography>
               <Typography sx={{ fontSize: 13 }}>ข้อตกลงจ้างงาน</Typography>
               <Typography sx={{ fontSize: 13 }}>{r.student_name}</Typography>
               <Typography sx={{ fontSize: 13 }}>{r.start_date}</Typography>
               <Chip label={statusChipMap[r.status].label} size="small" sx={{ bgcolor: statusChipMap[r.status].bg, color: statusChipMap[r.status].color, fontWeight: 600, justifySelf: 'start' }} />
+              {/* Only a declined offer can be removed — a draft is still live and an
+                  accepted one is a contract that payroll bills against. */}
+              {r.status === 'rejected' && (
+                <IconButton size="small" title="ลบข้อตกลงที่ถูกปฏิเสธ" onClick={() => setDeleteTarget(r)} sx={{ border: '1px solid #F3C2C4', borderRadius: 1.5, justifySelf: 'start' }}>
+                  <DeleteOutlineIcon fontSize="small" sx={{ color: '#DA1E28' }} />
+                </IconButton>
+              )}
             </Box>
           ))}
           {agreements.length === 0 && <Typography sx={{ fontSize: 13, color: '#9AA0A6', textAlign: 'center', py: 3 }}>ยังไม่มีประวัติ</Typography>}
         </Box>
       )}
+
+      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 3.5 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mb: 1 }}>ลบข้อตกลงที่ถูกปฏิเสธ?</Typography>
+          <Typography sx={{ fontSize: 14, color: '#52545C', mb: 1.5 }}>
+            {deleteTarget ? `${agreementCode(deleteTarget.id)} — ${deleteTarget.student_name}` : ''}
+          </Typography>
+          <Box sx={{ bgcolor: '#FDEAEA', color: '#B3261E', fontSize: 13, borderRadius: 2, p: 1.5, mb: 2.5 }}>
+            จะลบเงื่อนไขที่เสนอไปและเหตุผลที่นักศึกษาปฏิเสธออกถาวร — ย้อนกลับไม่ได้
+            <br />
+            ปกติแนะนำให้เก็บไว้เป็นหลักฐานว่าเคยเสนออะไรไปและถูกปฏิเสธเพราะอะไร
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
+            <Button onClick={() => setDeleteTarget(null)} sx={{ textTransform: 'none', borderRadius: '40px', px: 3, color: colors.navy, bgcolor: '#F0F0F0' }}>
+              ยกเลิก
+            </Button>
+            <Button
+              variant="contained"
+              disabled={deleting}
+              onClick={() => void handleDelete()}
+              sx={{ textTransform: 'none', borderRadius: '40px', px: 3, bgcolor: '#DA1E28', '&:hover': { bgcolor: '#B31923' } }}
+            >
+              {deleting ? 'กำลังลบ…' : 'ลบข้อตกลง'}
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
 
       <Dialog open={sendConfirmOpen} onClose={() => setSendConfirmOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
         <Box sx={{ p: 4, textAlign: 'center', position: 'relative' }}>
@@ -514,7 +676,7 @@ function EmployerEmploymentView() {
             * กรุณารอการยืนยันผลการตอบรับจากนักศึกษาที่แท็บ &quot;รายละเอียด / ตอบรับ-ปฏิเสธ&quot;
           </Box>
           <Button
-            onClick={() => { setSendConfirmOpen(false); setTab('status'); setStudentId(''); setStartDate(''); setWorkingHours(''); setLeavePolicy(''); setAdditionalTerms('') }}
+            onClick={() => { setSendConfirmOpen(false); setTab('status'); setInterviewId(''); setStartDate(''); setWorkingHours(''); setLeavePolicy(''); setAdditionalTerms('') }}
             sx={{ mt: 2.5, textTransform: 'none', color: colors.navy }}
           >
             ← ตกลง

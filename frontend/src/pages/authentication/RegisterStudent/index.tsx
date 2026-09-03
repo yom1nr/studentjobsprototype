@@ -27,6 +27,8 @@ import { upsertMyStudentProfile } from '../../../services/https/student'
 
 const colors = { navy: '#000349', bg: '#DAEAF7' }
 
+const todayISO = new Date().toISOString().slice(0, 10)
+
 function calcAgeFromDob(dob: string): number {
   const d = new Date(dob)
   if (Number.isNaN(d.getTime())) return 0
@@ -126,8 +128,10 @@ export default function RegisterStudentPage() {
     passwordOk &&
     form.password === form.confirmPassword
 
+  const dobOk = !form.dob || form.dob <= todayISO
+
   const step2Valid =
-    form.firstName.trim().length > 0 && form.lastName.trim().length > 0 && form.gender !== ''
+    form.firstName.trim().length > 0 && form.lastName.trim().length > 0 && form.gender !== '' && dobOk
 
   async function onSubmit(e: SyntheticEvent) {
     e.preventDefault()
@@ -286,8 +290,9 @@ export default function RegisterStudentPage() {
                 type="date"
                 value={form.dob}
                 onChange={(e) => set('dob', e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                helperText={form.dob ? `อายุ ${calcAgeFromDob(form.dob)} ปี` : ' '}
+                error={!dobOk}
+                slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: todayISO } }}
+                helperText={!dobOk ? 'วันเกิดต้องไม่เกินวันนี้' : form.dob ? `อายุ ${calcAgeFromDob(form.dob)} ปี` : ' '}
                 fullWidth
               />
               <TextField

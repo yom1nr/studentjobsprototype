@@ -89,7 +89,16 @@ func (h *StudentController) UpsertMyProfile(c *gin.Context) {
 
 	if payload.DateOfBirth == "" {
 		student.DateOfBirth = nil
-	} else if dob, perr := time.Parse("2006-01-02", payload.DateOfBirth); perr == nil {
+	} else {
+		dob, perr := time.Parse("2006-01-02", payload.DateOfBirth)
+		if perr != nil {
+			utils.JSONError(c, http.StatusBadRequest, "invalid date_of_birth", "expected format YYYY-MM-DD")
+			return
+		}
+		if dob.Year() < 1900 || dob.After(time.Now()) {
+			utils.JSONError(c, http.StatusBadRequest, "invalid date_of_birth", "date is out of the accepted range")
+			return
+		}
 		student.DateOfBirth = &dob
 	}
 

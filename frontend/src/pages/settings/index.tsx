@@ -1004,7 +1004,13 @@ function StudentSettingsView() {
                     type="date"
                     value={draft.dateOfBirth}
                     onChange={(e) => setDraft({ ...draft, dateOfBirth: e.target.value })}
-                    slotProps={{ inputLabel: { shrink: true } }}
+                    error={!!draft.dateOfBirth && draft.dateOfBirth > new Date().toISOString().slice(0, 10)}
+                    helperText={
+                      !!draft.dateOfBirth && draft.dateOfBirth > new Date().toISOString().slice(0, 10)
+                        ? 'วันเกิดต้องไม่เกินวันนี้'
+                        : undefined
+                    }
+                    slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: new Date().toISOString().slice(0, 10) } }}
                     sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
                   />
                 </Box>

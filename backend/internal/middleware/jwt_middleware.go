@@ -8,8 +8,9 @@ import (
     "github.com/SA/Golang-Backend-Example/internal/utils"
 )
 
-// JWTAuthMiddleware validates the JWT token and attaches the user ID to the request context.
-func JWTAuthMiddleware() gin.HandlerFunc {
+// JWTAuthMiddleware validates the JWT token and attaches the user ID to the
+// request context. It verifies against the same provider that issued the token.
+func JWTAuthMiddleware(provider utils.JWTProvider) gin.HandlerFunc {
     return func(c *gin.Context) {
         authHeader := c.GetHeader("Authorization")
         if authHeader == "" {
@@ -25,7 +26,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
         }
 
         tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-        claims, err := utils.ParseToken(tokenString)
+        claims, err := provider.ParseToken(tokenString)
         if err != nil {
             utils.JSONError(c, http.StatusUnauthorized, "invalid token", err.Error())
             c.Abort()

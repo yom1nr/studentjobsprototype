@@ -34,23 +34,25 @@ func NewEmploymentController(db *gorm.DB) *EmploymentController {
 // A contract with no start date or no duration has no end that can be computed,
 // so it counts as still running: treating it as expired would quietly let a second
 // contract be signed on top of a live one.
-func activeAgreementFor(db *gorm.DB, studentID, employerID uint) (*models.EmploymentAgreement, bool) {
+func activeAgreementFor(db *gorm.DB, studentID, employerID uint) (*models.EmploymentAgreement, bool, error) {
 	var agreements []models.EmploymentAgreement
 	if err := db.Where("student_id = ? AND employer_id = ? AND status IN ?",
 		studentID, employerID, []string{"pending", "accepted"}).Find(&agreements).Error; err != nil {
-		return nil, false
+		// Fail closed: a query error must not be read as "no active contract"
+		// and let a second one through.
+		return nil, false, err
 	}
 	now := time.Now().UTC()
 	for i := range agreements {
 		a := &agreements[i]
 		if a.Status == "pending" || a.StartDate == nil || a.DurationMonths <= 0 {
-			return a, true
+			return a, true, nil
 		}
 		if a.StartDate.AddDate(0, a.DurationMonths, 0).After(now) {
-			return a, true
+			return a, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 // agreementEndText renders when a contract runs out, for messages that tell
@@ -119,7 +121,12 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 	// A student works under one contract per employer at a time. A second one
 	// while the first is still running would leave two live sets of terms — wages,
 	// hours, end date — for the same job relationship.
-	if live, busy := activeAgreementFor(h.db, student.UserID, employer.UserID); busy {
+	live, busy, err := activeAgreementFor(h.db, student.UserID, employer.UserID)
+	if err != nil {
+		utils.JSONInternalError(c, "create failed", err)
+		return
+	}
+	if busy {
 		detail := "this student is already under contract with you"
 		if end := agreementEndText(live); end != "" {
 			detail += " until " + end

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"io"
 	"fmt"
 	"log"
 	"net/http"
@@ -389,8 +390,13 @@ func (h *InterviewController) RespondToReschedule(c *gin.Context, approve bool) 
 		return
 	}
 
+	// The reason is optional, so an empty body is fine — but a body that was
+	// sent and is malformed should not be silently ignored.
 	var payload dto.RejectRescheduleRequest
-	_ = c.ShouldBindJSON(&payload)
+	if err := c.ShouldBindJSON(&payload); err != nil && !errors.Is(err, io.EOF) {
+		utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
+		return
+	}
 
 	now := time.Now().UTC()
 	if err := h.db.Transaction(func(tx *gorm.DB) error {

@@ -172,14 +172,9 @@ function AppShellInner() {
   const bottomNavItems = buildBottomNavItems(unreadNotifications)
 
   function handleLogout() {
+    // Just clear the session. ProtectedRoute sees token become null and
+    // redirects to "/" on its own — one navigation, no race to lose.
     logout()
-    // Deferred: ProtectedRoute reacts to the token clearing to null by
-    // rendering its own <Navigate to="/login" replace/>, whose effect commits
-    // after this handler returns and overwrites a same-tick navigate('/') call
-    // with a history.replaceState to /login. Running ours on the next tick,
-    // via setTimeout(0), guarantees it commits after that redirect instead of
-    // racing it, so logout always lands on the landing page as intended.
-    setTimeout(() => navigate('/', { replace: true }), 0)
   }
 
   function isActive(path: string) {

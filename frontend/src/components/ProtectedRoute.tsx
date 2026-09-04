@@ -14,7 +14,10 @@ export function ProtectedRoute() {
   }
 
   if (!token) {
-    return <Navigate to="/login" replace />
+    // Landing page, not /login: it is the entry point for logged-out visitors
+    // and the natural place to end up after logging out. Making this the single
+    // redirect target means the logout handler doesn't have to race it.
+    return <Navigate to="/" replace />
   }
 
   return <Outlet />

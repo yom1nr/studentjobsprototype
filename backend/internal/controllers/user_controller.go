@@ -149,7 +149,16 @@ func (h *UserController) DeleteUser(c *gin.Context) {
         return
     }
 
-    if err := h.db.Delete(user).Error; err != nil {
+    // Soft delete keeps the row, so its email still occupies the unique index
+    // and the address can never register again. Free it first (in the same
+    // transaction) by prefixing it with the now-dead user's id.
+    if err := h.db.Transaction(func(tx *gorm.DB) error {
+        freed := "deleted+" + strconv.FormatUint(uint64(user.UserID), 10) + "+" + user.Email
+        if err := tx.Model(user).Update("email", freed).Error; err != nil {
+            return err
+        }
+        return tx.Delete(user).Error
+    }); err != nil {
         utils.JSONInternalError(c, "delete failed", err)
         return
     }

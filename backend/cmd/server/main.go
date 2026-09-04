@@ -47,6 +47,7 @@ func main() {
 
     router := routes.SetupRouter(
         db,
+        jwtProvider,
         authController,
         userController,
         employerController,

@@ -6,11 +6,13 @@ import (
 
     "github.com/SA/Golang-Backend-Example/internal/controllers"
     "github.com/SA/Golang-Backend-Example/internal/middleware"
+    "github.com/SA/Golang-Backend-Example/internal/utils"
 )
 
 // SetupRouter registers application routes and middleware.
 func SetupRouter(
     db *gorm.DB,
+    jwtProvider utils.JWTProvider,
     authHandler *controllers.AuthController,
     userHandler *controllers.UserController,
     employerHandler *controllers.EmployerController,
@@ -32,6 +34,10 @@ func SetupRouter(
     router.Use(gin.Logger(), gin.Recovery())
     router.Use(middleware.CORSMiddleware())
 
+    // One JWT middleware instance, verifying against the provider that issues
+    // tokens (not a re-read of the environment).
+    jwtAuth := middleware.JWTAuthMiddleware(jwtProvider)
+
     // Public Routes
     api := router.Group("/api/v1")
     auth := api.Group("/auth")
@@ -39,11 +45,11 @@ func SetupRouter(
     auth.POST("/login", authHandler.Login)
 
     // File upload — any authenticated user (profile images, employer docs, evidence)
-    api.POST("/upload", middleware.JWTAuthMiddleware(), uploadHandler.UploadFile)
+    api.POST("/upload", jwtAuth, uploadHandler.UploadFile)
 
     // Private Routes
     users := api.Group("/users")
-    users.Use(middleware.JWTAuthMiddleware())
+    users.Use(jwtAuth)
     users.GET("/profile", userHandler.GetProfile)
     users.PUT("/profile", userHandler.UpdateProfile)
     users.DELETE("/profile", userHandler.DeleteUser)
@@ -56,7 +62,7 @@ func SetupRouter(
     approvedEmployer := middleware.RequireApprovedEmployer(db)
 
     employer := api.Group("/employer")
-    employer.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("employer"))
+    employer.Use(jwtAuth, middleware.RequireRole("employer"))
     employer.GET("/profile", employerHandler.GetMyProfile)
     employer.PUT("/profile", employerHandler.UpsertMyProfile)
     employer.POST("/documents/acknowledge", employerHandler.AcknowledgeRequestNote)
@@ -73,7 +79,7 @@ func SetupRouter(
 
     // Student's own profile
     student := api.Group("/student")
-    student.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("student"))
+    student.Use(jwtAuth, middleware.RequireRole("student"))
     student.GET("/profile", studentHandler.GetMyProfile)
     student.PUT("/profile", studentHandler.UpsertMyProfile)
     student.POST("/schedule/extract", studentHandler.ExtractScheduleFromImage)
@@ -111,13 +117,13 @@ func SetupRouter(
 
     // Interviews / agreements — shared reads and reschedule requests (any authenticated role)
     interviews := api.Group("/interviews")
-    interviews.Use(middleware.JWTAuthMiddleware())
+    interviews.Use(jwtAuth)
     interviews.GET("", interviewHandler.ListMine)
     interviews.POST("/:id/reschedule", interviewHandler.RequestReschedule)
     interviews.GET("/:id/reschedules", interviewHandler.ListReschedules)
 
     agreements := api.Group("/agreements")
-    agreements.Use(middleware.JWTAuthMiddleware())
+    agreements.Use(jwtAuth)
     agreements.GET("", employmentHandler.ListMine)
 
     // Student: time tracking (B6729875 subsystem 1)
@@ -142,12 +148,12 @@ func SetupRouter(
 
     // Payroll — shared read (any authenticated role)
     payrolls := api.Group("/payrolls")
-    payrolls.Use(middleware.JWTAuthMiddleware())
+    payrolls.Use(jwtAuth)
     payrolls.GET("", payrollHandler.ListMine)
 
     // Complaints (B6716493 subsystem 1) — submit/read own (any authenticated role)
     complaints := api.Group("/complaints")
-    complaints.Use(middleware.JWTAuthMiddleware())
+    complaints.Use(jwtAuth)
     complaints.POST("", complaintHandler.Create)
     complaints.GET("", complaintHandler.ListMine)
     complaints.GET("/:id", complaintHandler.GetDetail)
@@ -155,7 +161,7 @@ func SetupRouter(
 
     // Admin: employer verification workflow
     admin := api.Group("/admin")
-    admin.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("admin"))
+    admin.Use(jwtAuth, middleware.RequireRole("admin"))
     admin.GET("/employers", adminHandler.ListEmployerApprovals)
     admin.GET("/employers/:id", adminHandler.GetEmployerDetail)
     admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)
@@ -177,7 +183,7 @@ func SetupRouter(
 
     // Notifications (any authenticated role)
     notifications := api.Group("/notifications")
-    notifications.Use(middleware.JWTAuthMiddleware())
+    notifications.Use(jwtAuth)
     notifications.GET("", notificationHandler.ListMine)
     notifications.GET("/unread-count", notificationHandler.UnreadCount)
     notifications.PUT("/:id/read", notificationHandler.MarkRead)

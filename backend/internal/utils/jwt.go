@@ -2,7 +2,6 @@ package utils
 
 import (
     "errors"
-    "os"
     "time"
 
     "github.com/golang-jwt/jwt/v5"
@@ -45,11 +44,12 @@ func (p JWTProvider) GenerateToken(userID uint, role string) (string, error) {
     return token.SignedString([]byte(p.secret))
 }
 
-// ParseToken validates a token string and returns its claims.
-func ParseToken(tokenString string) (*JWTClaims, error) {
-    secret := os.Getenv("JWT_SECRET")
-    if secret == "" {
-        return nil, errors.New("JWT_SECRET is not set")
+// ParseToken validates a token string against this provider's secret and
+// returns its claims. Uses the same secret GenerateToken signs with, rather
+// than re-reading the environment, so signing and verification can't drift.
+func (p JWTProvider) ParseToken(tokenString string) (*JWTClaims, error) {
+    if p.secret == "" {
+        return nil, errors.New("jwt secret is not configured")
     }
 
     claims := &JWTClaims{}
@@ -57,7 +57,7 @@ func ParseToken(tokenString string) (*JWTClaims, error) {
         if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
             return nil, errors.New("unexpected signing method")
         }
-        return []byte(secret), nil
+        return []byte(p.secret), nil
     })
     if err != nil {
         return nil, err

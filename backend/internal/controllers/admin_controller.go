@@ -323,8 +323,10 @@ func mapEmployerApprovalStatus(employer *models.Employer) gin.H {
 // ListAllEmployers returns every employer account (not just pending approvals)
 // for the admin's employer directory.
 func (h *AdminController) ListAllEmployers(c *gin.Context) {
+    limit, offset := utils.ReadPage(c, 500)
     var users []models.User
-    if err := h.db.Preload("Employer").Where("role = ?", "employer").Find(&users).Error; err != nil {
+    if err := h.db.Preload("Employer").Where("role = ?", "employer").
+        Limit(limit).Offset(offset).Order("user_id").Find(&users).Error; err != nil {
         utils.JSONInternalError(c, "failed to load employers", err)
         return
     }
@@ -468,8 +470,10 @@ func (h *AdminController) UpdateEmployer(c *gin.Context) {
 
 // ListAllStudents returns every student account for the admin's student directory.
 func (h *AdminController) ListAllStudents(c *gin.Context) {
+    limit, offset := utils.ReadPage(c, 500)
     var users []models.User
-    if err := h.db.Preload("Student").Where("role = ?", "student").Find(&users).Error; err != nil {
+    if err := h.db.Preload("Student").Where("role = ?", "student").
+        Limit(limit).Offset(offset).Order("user_id").Find(&users).Error; err != nil {
         utils.JSONInternalError(c, "failed to load students", err)
         return
     }

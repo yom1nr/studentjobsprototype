@@ -178,8 +178,9 @@ func (h *UserController) DeleteUser(c *gin.Context) {
 
 // GetAllUsers returns a list of all users.
 func (h *UserController) GetAllUsers(c *gin.Context) {
+    limit, offset := utils.ReadPage(c, 500)
     var users []models.User
-    if err := h.db.Find(&users).Error; err != nil {
+    if err := h.db.Limit(limit).Offset(offset).Order("user_id").Find(&users).Error; err != nil {
         utils.JSONInternalError(c, "failed to load users", err)
         return
     }

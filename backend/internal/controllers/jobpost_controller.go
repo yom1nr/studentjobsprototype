@@ -27,8 +27,10 @@ func NewJobpostController(db *gorm.DB) *JobpostController {
 
 // ListOpenJobposts returns open job postings for students to browse.
 func (h *JobpostController) ListOpenJobposts(c *gin.Context) {
+	limit, offset := utils.ReadPage(c, 200)
 	var jobposts []models.Jobpost
-	if err := h.db.Where("status = ?", "open").Order("created_at DESC").Find(&jobposts).Error; err != nil {
+	if err := h.db.Where("status = ?", "open").Order("created_at DESC").
+		Limit(limit).Offset(offset).Find(&jobposts).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load job posts", err)
 		return
 	}

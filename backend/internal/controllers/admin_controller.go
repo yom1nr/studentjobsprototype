@@ -324,20 +324,28 @@ func mapEmployerApprovalStatus(employer *models.Employer) gin.H {
 // for the admin's employer directory.
 func (h *AdminController) ListAllEmployers(c *gin.Context) {
     limit, offset := utils.ReadPage(c, 500)
-    var users []models.User
-    if err := h.db.Preload("Employer").Where("role = ?", "employer").
-        Limit(limit).Offset(offset).Order("user_id").Find(&users).Error; err != nil {
+    // Queried from Employer, not User: a User-rooted query with LIMIT/OFFSET
+    // and a Go-side "skip rows with no Employer profile" filter can return
+    // fewer than `limit` rows on a page even when more matching employers
+    // exist further down (e.g. users who registered but never completed
+    // onboarding sitting between two profiled ones). Employer is the FROM
+    // table here, so every row this query can return already has a profile.
+    var employers []models.Employer
+    if err := h.db.Preload("User").
+        Where("user_id IN (?)", h.db.Model(&models.User{}).Select("user_id").Where("role = ?", "employer")).
+        Order("user_id").
+        Limit(limit).Offset(offset).
+        Find(&employers).Error; err != nil {
         utils.JSONInternalError(c, "failed to load employers", err)
         return
     }
 
-    responses := make([]dto.EmployerDirectoryResponse, 0, len(users))
-    for i := range users {
-        user := users[i]
-        if user.Employer == nil {
+    responses := make([]dto.EmployerDirectoryResponse, 0, len(employers))
+    for i := range employers {
+        if employers[i].User == nil {
             continue
         }
-        responses = append(responses, mapEmployerToDirectoryResponse(&user, user.Employer))
+        responses = append(responses, mapEmployerToDirectoryResponse(employers[i].User, &employers[i]))
     }
 
     utils.JSONSuccess(c, http.StatusOK, responses)
@@ -471,20 +479,26 @@ func (h *AdminController) UpdateEmployer(c *gin.Context) {
 // ListAllStudents returns every student account for the admin's student directory.
 func (h *AdminController) ListAllStudents(c *gin.Context) {
     limit, offset := utils.ReadPage(c, 500)
-    var users []models.User
-    if err := h.db.Preload("Student").Where("role = ?", "student").
-        Limit(limit).Offset(offset).Order("user_id").Find(&users).Error; err != nil {
+    // Queried from Student, not User — same reasoning as ListAllEmployers:
+    // rooting on the profile table is what makes LIMIT/OFFSET actually mean
+    // "this many profiles", not "this many users, some of which turned out to
+    // have no profile and got silently dropped".
+    var students []models.Student
+    if err := h.db.Preload("User").
+        Where("user_id IN (?)", h.db.Model(&models.User{}).Select("user_id").Where("role = ?", "student")).
+        Order("user_id").
+        Limit(limit).Offset(offset).
+        Find(&students).Error; err != nil {
         utils.JSONInternalError(c, "failed to load students", err)
         return
     }
 
-    responses := make([]dto.StudentDirectoryResponse, 0, len(users))
-    for i := range users {
-        user := users[i]
-        if user.Student == nil {
+    responses := make([]dto.StudentDirectoryResponse, 0, len(students))
+    for i := range students {
+        if students[i].User == nil {
             continue
         }
-        responses = append(responses, mapStudentToDirectoryResponse(&user, user.Student))
+        responses = append(responses, mapStudentToDirectoryResponse(students[i].User, &students[i]))
     }
 
     utils.JSONSuccess(c, http.StatusOK, responses)

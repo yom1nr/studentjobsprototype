@@ -115,6 +115,7 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
 		return
 	}
 
+	limit, offset := utils.ReadPage(c, 200)
 	var applications []models.Application
 	if err := h.db.
 		Preload("Jobpost").
@@ -122,6 +123,7 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
 		Preload("Audits", func(db *gorm.DB) *gorm.DB { return db.Order("checked_at ASC") }).
 		Where("student_id = ?", student.UserID).
 		Order("created_at DESC").
+		Limit(limit).Offset(offset).
 		Find(&applications).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load applications", err)
 		return
@@ -240,12 +242,14 @@ func (h *ApplicationController) ListEmployerApplications(c *gin.Context) {
 	var jobpostIDs []uint
 	h.db.Model(&models.Jobpost{}).Where("user_id = ?", employer.UserID).Pluck("jobpost_id", &jobpostIDs)
 
+	limit, offset := utils.ReadPage(c, 200)
 	var applications []models.Application
 	query := h.db.
 		Preload("Jobpost").
 		Preload("Documents").
 		Preload("Audits", func(db *gorm.DB) *gorm.DB { return db.Order("checked_at ASC") }).
-		Order("created_at DESC")
+		Order("created_at DESC").
+		Limit(limit).Offset(offset)
 	if len(jobpostIDs) > 0 {
 		query = query.Where("jobpost_id IN ?", jobpostIDs)
 	} else {
@@ -354,12 +358,14 @@ func (h *ApplicationController) ReviewApplication(c *gin.Context) {
 // ListAdminApplications returns employer-accepted applications for the university
 // admin's final verification pass (role=admin only).
 func (h *ApplicationController) ListAdminApplications(c *gin.Context) {
+	limit, offset := utils.ReadPage(c, 200)
 	var applications []models.Application
 	if err := h.db.
 		Preload("Jobpost").
 		Preload("Audits", func(db *gorm.DB) *gorm.DB { return db.Order("checked_at ASC") }).
 		Where("status = ?", "accepted").
 		Order("created_at DESC").
+		Limit(limit).Offset(offset).
 		Find(&applications).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load applications", err)
 		return

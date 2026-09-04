@@ -81,8 +81,10 @@ func (h *ComplaintController) ListMine(c *gin.Context) {
 		return
 	}
 
+	limit, offset := utils.ReadPage(c, 200)
 	var complaints []models.Complaint
-	if err := h.db.Preload("Histories").Preload("Attachments").Where("user_id = ?", userID).Order("created_at DESC").Find(&complaints).Error; err != nil {
+	if err := h.db.Preload("Histories").Preload("Attachments").Where("user_id = ?", userID).
+		Order("created_at DESC").Limit(limit).Offset(offset).Find(&complaints).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load complaints", err)
 		return
 	}
@@ -96,8 +98,10 @@ func (h *ComplaintController) ListMine(c *gin.Context) {
 
 // ListAll returns every complaint (admin only).
 func (h *ComplaintController) ListAll(c *gin.Context) {
+	limit, offset := utils.ReadPage(c, 200)
 	var complaints []models.Complaint
-	if err := h.db.Preload("Histories").Preload("Attachments").Order("created_at DESC").Find(&complaints).Error; err != nil {
+	if err := h.db.Preload("Histories").Preload("Attachments").
+		Order("created_at DESC").Limit(limit).Offset(offset).Find(&complaints).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load complaints", err)
 		return
 	}

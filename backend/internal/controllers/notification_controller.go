@@ -31,7 +31,8 @@ func (h *NotificationController) ListMine(c *gin.Context) {
         return
     }
 
-    query := h.db.Where("user_id = ?", userID).Order("created_at DESC")
+    limit, offset := utils.ReadPage(c, 500)
+    query := h.db.Where("user_id = ?", userID).Order("created_at DESC").Limit(limit).Offset(offset)
     if c.Query("unread") == "true" {
         query = query.Where("is_read = ?", false)
     }

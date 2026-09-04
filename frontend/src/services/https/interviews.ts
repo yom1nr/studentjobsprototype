@@ -2,6 +2,7 @@ import type {
   CreateInterviewRequest,
   InterviewResultRequest,
   InterviewScheduleRecord,
+  OfferRescheduleSlotsRequest,
   RequestRescheduleRequest,
   RescheduleEntry,
   SelectRescheduleSlotRequest,
@@ -21,8 +22,14 @@ export function updateInterview(token: string, id: number, payload: UpdateInterv
   return apiFetch<InterviewScheduleRecord>(`/api/v1/employer/interviews/${id}`, { method: 'PUT', token, body: payload })
 }
 
-export function requestReschedule(token: string, id: number, payload: RequestRescheduleRequest): Promise<{ created: boolean }> {
-  return apiFetch<{ created: boolean }>(`/api/v1/interviews/${id}/reschedule`, { method: 'POST', token, body: payload })
+/** Student asking to move an interview to a single time. */
+export function requestReschedule(token: string, id: number, payload: RequestRescheduleRequest): Promise<RescheduleEntry> {
+  return apiFetch<RescheduleEntry>(`/api/v1/student/interviews/${id}/reschedule`, { method: 'POST', token, body: payload })
+}
+
+/** Employer offering the student several times to choose from. */
+export function offerRescheduleSlots(token: string, id: number, payload: OfferRescheduleSlotsRequest): Promise<RescheduleEntry> {
+  return apiFetch<RescheduleEntry>(`/api/v1/employer/interviews/${id}/reschedule-offer`, { method: 'POST', token, body: payload })
 }
 
 export function listReschedules(token: string, id: number): Promise<RescheduleEntry[]> {

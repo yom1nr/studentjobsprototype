@@ -30,6 +30,7 @@ import {
   approveReschedule,
   listReschedules,
   rejectReschedule,
+  offerRescheduleSlots,
   requestReschedule,
   selectRescheduleSlot,
   sendInterviewResult,
@@ -282,12 +283,14 @@ function StudentInterviewsView() {
   }
 
   async function submitReschedule() {
-    if (!token || !interview) return
+    // The submit button is disabled until both fields are filled (below), so
+    // this is reachable only once there's a real value to send.
+    if (!token || !interview || !rescheduleDate || !rescheduleTime) return
     setRescheduleSubmitting(true)
     try {
       await requestReschedule(token, interview.id, {
         reason: rescheduleReason,
-        student_available_date_time: rescheduleDate && rescheduleTime ? `${rescheduleDate}T${rescheduleTime}:00Z` : undefined,
+        student_available_date_time: `${rescheduleDate}T${rescheduleTime}:00Z`,
       })
       setRescheduleRequested(true)
       setRescheduleOpen(false)
@@ -817,7 +820,7 @@ function EmployerInterviewsView() {
     if (!token || !selectedInterview) return
     setRescheduleSubmitting(true)
     try {
-      await requestReschedule(token, selectedInterview.id, {
+      await offerRescheduleSlots(token, selectedInterview.id, {
         reason: rescheduleNote,
         proposed_slots: filledOfferSlots,
       })

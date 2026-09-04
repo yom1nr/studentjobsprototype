@@ -43,19 +43,22 @@ type InterviewResponse struct {
 	Reschedules        []RescheduleResponse `json:"reschedules,omitempty"`
 }
 
-// RequestRescheduleRequest asks the other party to propose/confirm a new time.
-// Reason doubles as the free-text note either side sends (e.g. the employer's
-// "please tell me your availability" question, or the student's own reason).
+// RequestRescheduleRequest is the student asking to move an interview to a
+// single time; the employer then approves or rejects it. Reason is the
+// student's free-text note for why.
 type RequestRescheduleRequest struct {
+	Reason                   string `json:"reason" validate:"required"`
+	StudentAvailableDateTime string `json:"student_available_date_time" validate:"required"`
+}
+
+// OfferRescheduleSlotsRequest is the employer offering the student several
+// times to choose from instead of asking the student for one. There is no
+// approval step after the student's pick — the employer already committed to
+// every slot listed here.
+type OfferRescheduleSlotsRequest struct {
 	Reason string `json:"reason" validate:"required"`
-	// Student flow: the one slot the student is asking to move to. The employer
-	// then approves or rejects it.
-	StudentAvailableDateTime string `json:"student_available_date_time" validate:"omitempty"`
-	// Employer flow: the times being offered, RFC3339, for the student to choose
-	// from. Offering slots and approving a proposal are mutually exclusive, so a
-	// request carries one or the other, never both.
-	ProposedSlots          []string `json:"proposed_slots" validate:"omitempty,max=5,dive,required"`
-	NewAppointmentDateTime string   `json:"new_appointment_date_time" validate:"omitempty"`
+	// RFC3339, in UTC (see utcInstant), up to 5.
+	ProposedSlots []string `json:"proposed_slots" validate:"required,min=1,max=5,dive,required"`
 }
 
 // SelectRescheduleSlotRequest is the student picking one of the slots the

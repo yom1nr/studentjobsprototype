@@ -53,13 +53,18 @@ export type CreateInterviewRequest = {
  *  to is fixed when it is created. */
 export type UpdateInterviewRequest = Omit<CreateInterviewRequest, 'application_id'>
 
+/** Student asking to move an interview to a single time; the employer then
+ *  approves or rejects it. */
 export type RequestRescheduleRequest = {
   reason: string
-  /** Student flow: the one time being asked for. */
-  student_available_date_time?: string
-  /** Employer flow: the times offered for the student to pick from. */
-  proposed_slots?: string[]
-  new_appointment_date_time?: string
+  student_available_date_time: string
+}
+
+/** Employer offering the student several times to choose from instead of
+ *  asking the student for one — up to 5, RFC3339 in UTC. */
+export type OfferRescheduleSlotsRequest = {
+  reason: string
+  proposed_slots: string[]
 }
 
 export type SelectRescheduleSlotRequest = {

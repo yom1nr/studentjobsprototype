@@ -155,6 +155,15 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 		Status:              "pending",
 	}
 	if err := h.db.Create(agreement).Error; err != nil {
+		// The prior-agreement check above is read-then-write; a second request for
+		// the same interview arriving in the gap between that check and this
+		// insert lands here instead of both succeeding — the partial unique index
+		// on (interview_schedule_id) is the actual guarantee, this check is just
+		// the common-case fast path with a friendlier message.
+		if utils.IsUniqueViolation(err) {
+			utils.JSONError(c, http.StatusConflict, "create failed", "an employment agreement has already been sent for this interview")
+			return
+		}
 		utils.JSONInternalError(c, "create failed", err)
 		return
 	}

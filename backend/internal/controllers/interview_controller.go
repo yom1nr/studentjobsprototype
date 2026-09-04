@@ -2,8 +2,8 @@ package controllers
 
 import (
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -90,9 +90,9 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		return
 	}
 
-	date, err := time.Parse("2006-01-02", payload.AppointmentDate)
+	date, canonicalTime, err := parseAppointmentDateTime(payload.AppointmentDate, payload.AppointmentTime)
 	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "invalid appointment_date", "expected format YYYY-MM-DD")
+		utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		StudentID:          student.UserID,
 		EmployerID:         employer.UserID,
 		InterviewFormat:    payload.InterviewFormat,
-		AppointmentTime:    payload.AppointmentTime,
+		AppointmentTime:    canonicalTime,
 		AppointmentDate:    &date,
 		Location:           payload.Location,
 		PreparationDetails: payload.PreparationDetails,
@@ -194,18 +194,21 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
 		return
 	}
-	date, err := time.Parse("2006-01-02", payload.AppointmentDate)
+	date, canonicalTime, err := parseAppointmentDateTime(payload.AppointmentDate, payload.AppointmentTime)
 	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "invalid appointment_date", "expected format YYYY-MM-DD")
+		utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
 		return
 	}
 
-	interview.InterviewFormat = payload.InterviewFormat
-	interview.AppointmentTime = payload.AppointmentTime
-	interview.AppointmentDate = &date
-	interview.Location = payload.Location
-	interview.PreparationDetails = payload.PreparationDetails
-	if err := h.db.Save(interview).Error; err != nil {
+	if err := setAppointment(h.db, interview.InterviewID, date, canonicalTime, map[string]any{
+		"interview_format":    payload.InterviewFormat,
+		"location":            payload.Location,
+		"preparation_details": payload.PreparationDetails,
+	}); err != nil {
+		utils.JSONInternalError(c, "update failed", err)
+		return
+	}
+	if err := h.db.First(interview, interview.InterviewID).Error; err != nil {
 		utils.JSONInternalError(c, "update failed", err)
 		return
 	}
@@ -306,6 +309,14 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 	}
 
 	if err := h.db.Create(reschedule).Error; err != nil {
+		// Same race as the pending-request check above: the partial unique index
+		// on (interview_schedule_id) WHERE status='pending' is what actually stops
+		// two requests submitted at nearly the same moment, this is just the
+		// friendlier message for the common case.
+		if utils.IsUniqueViolation(err) {
+			utils.JSONError(c, http.StatusBadRequest, "request failed", "there is already a reschedule request waiting for an answer")
+			return
+		}
 		utils.JSONInternalError(c, "request failed", err)
 		return
 	}
@@ -339,22 +350,53 @@ func reasonSuffix(reason string) string {
 	return " (เหตุผล: " + reason + ")"
 }
 
-// applySlotToInterview moves the appointment to t and puts the interview back to
-// a confirmed state, so an agreed reschedule leaves nothing stuck in
-// "rescheduling". AppointmentDate and AppointmentTime are stored separately, so
-// the slot is split across both.
+// parseAppointmentDateTime parses and validates a caller-supplied date/time
+// pair into the canonical shape every appointment write uses: a UTC-midnight
+// time.Time for the date, and a zero-padded 24-hour "HH:MM" string for the
+// time. CreateInterview and UpdateInterview both go through this, so a typed
+// appointment_time (previously stored as whatever raw string the client sent)
+// can no longer drift from the HH:MM shape reschedules write.
+func parseAppointmentDateTime(dateStr, timeStr string) (date time.Time, canonicalTime string, err error) {
+	date, err = time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return time.Time{}, "", errors.New("appointment_date must be YYYY-MM-DD")
+	}
+	t, err := time.Parse("15:04", timeStr)
+	if err != nil {
+		return time.Time{}, "", errors.New("appointment_time must be HH:MM (24-hour)")
+	}
+	return date, t.Format("15:04"), nil
+}
+
+// setAppointment is the single writer for an interview's schedule columns —
+// appointment_date, appointment_time, and (via extra) whatever else is
+// changing alongside them. Every handler that moves an appointment goes
+// through it, so the two date/time columns can't end up in different
+// encodings depending on which handler wrote them: previously UpdateInterview
+// saved the caller's raw time string next to a bare date.Parse, while
+// applySlotToInterview computed a UTC-normalised HH:MM from an instant — two
+// shapes for the same pair of columns.
+func setAppointment(tx *gorm.DB, interviewID uint, date time.Time, timeStr string, extra map[string]any) error {
+	updates := map[string]any{
+		"appointment_date": date,
+		"appointment_time": timeStr,
+	}
+	for k, v := range extra {
+		updates[k] = v
+	}
+	return tx.Model(&models.InterviewSchedule{}).Where("interview_id = ?", interviewID).Updates(updates).Error
+}
+
+// applySlotToInterview moves the appointment to t and puts the interview back
+// to a confirmed state, so an agreed reschedule leaves nothing stuck in
+// "rescheduling".
 func (h *InterviewController) applySlotToInterview(tx *gorm.DB, interviewID uint, t time.Time) error {
 	// Slots arrive as UTC and are stored that way, but the driver hands them back
 	// in the server's local zone. Normalising here keeps the wall clock the user
 	// picked — without it a 14:00 request lands on the appointment as 21:00.
 	utc := t.UTC()
 	day := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
-	return tx.Model(&models.InterviewSchedule{}).Where("interview_id = ?", interviewID).
-		Updates(map[string]any{
-			"appointment_date": day,
-			"appointment_time": utc.Format("15:04"),
-			"status":           "confirmed",
-		}).Error
+	return setAppointment(tx, interviewID, day, utc.Format("15:04"), map[string]any{"status": "confirmed"})
 }
 
 // RespondToReschedule is the employer approving or rejecting the time a student

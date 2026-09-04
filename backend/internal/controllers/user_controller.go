@@ -149,13 +149,23 @@ func (h *UserController) DeleteUser(c *gin.Context) {
         return
     }
 
-    // Soft delete keeps the row, so its email still occupies the unique index
-    // and the address can never register again. Free it first (in the same
-    // transaction) by prefixing it with the now-dead user's id.
+    // FK constraints are disabled for migration, so nothing cascades. Drop the
+    // 1-to-1 profile alongside the account in one transaction, otherwise it is
+    // left orphaned pointing at a user id that no longer exists.
     if err := h.db.Transaction(func(tx *gorm.DB) error {
-        freed := "deleted+" + strconv.FormatUint(uint64(user.UserID), 10) + "+" + user.Email
-        if err := tx.Model(user).Update("email", freed).Error; err != nil {
-            return err
+        switch user.Role {
+        case "student":
+            if err := tx.Where("user_id = ?", user.UserID).Delete(&models.Student{}).Error; err != nil {
+                return err
+            }
+        case "employer":
+            if err := tx.Where("user_id = ?", user.UserID).Delete(&models.Employer{}).Error; err != nil {
+                return err
+            }
+        case "admin":
+            if err := tx.Where("user_id = ?", user.UserID).Delete(&models.Admin{}).Error; err != nil {
+                return err
+            }
         }
         return tx.Delete(user).Error
     }); err != nil {

@@ -127,11 +127,15 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
 		return
 	}
 
+	empIDs := make([]uint, 0, len(applications))
+	for i := range applications {
+		empIDs = append(empIDs, applications[i].Jobpost.UserID)
+	}
+	companies := h.companyNameMap(empIDs)
+
 	responses := make([]dto.ApplicationResponse, 0, len(applications))
 	for i := range applications {
-		var employer models.Employer
-		h.db.Select("company_name").First(&employer, applications[i].Jobpost.UserID)
-		responses = append(responses, mapApplicationToResponse(&applications[i], employer.CompanyName, "", "", "", ""))
+		responses = append(responses, mapApplicationToResponse(&applications[i], companies[applications[i].Jobpost.UserID], "", "", "", ""))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -252,10 +256,16 @@ func (h *ApplicationController) ListEmployerApplications(c *gin.Context) {
 		return
 	}
 
+	sIDs := make([]uint, 0, len(applications))
+	for i := range applications {
+		sIDs = append(sIDs, applications[i].StudentID)
+	}
+	disp := h.studentDisplayMap(sIDs)
+
 	responses := make([]dto.ApplicationResponse, 0, len(applications))
 	for i := range applications {
-		name, university, phone, email := h.studentDisplayFields(applications[i].StudentID)
-		responses = append(responses, mapApplicationToResponse(&applications[i], employer.CompanyName, name, university, phone, email))
+		d := disp[applications[i].StudentID]
+		responses = append(responses, mapApplicationToResponse(&applications[i], employer.CompanyName, d.name, d.university, d.phone, d.email))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -355,12 +365,19 @@ func (h *ApplicationController) ListAdminApplications(c *gin.Context) {
 		return
 	}
 
+	sIDs := make([]uint, 0, len(applications))
+	eIDs := make([]uint, 0, len(applications))
+	for i := range applications {
+		sIDs = append(sIDs, applications[i].StudentID)
+		eIDs = append(eIDs, applications[i].Jobpost.UserID)
+	}
+	disp := h.studentDisplayMap(sIDs)
+	companies := h.companyNameMap(eIDs)
+
 	responses := make([]dto.AdminApplicationResponse, 0, len(applications))
 	for i := range applications {
-		var employer models.Employer
-		h.db.Select("company_name").First(&employer, applications[i].Jobpost.UserID)
-		name, university, _, _ := h.studentDisplayFields(applications[i].StudentID)
-		responses = append(responses, mapAdminApplicationToResponse(&applications[i], employer.CompanyName, name, university))
+		d := disp[applications[i].StudentID]
+		responses = append(responses, mapAdminApplicationToResponse(&applications[i], companies[applications[i].Jobpost.UserID], d.name, d.university))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -609,6 +626,58 @@ func (h *ApplicationController) studentDisplayFields(studentID uint) (name, univ
 		email = user.Email
 	}
 	return name, university, phone, email
+}
+
+type studentDisplay struct{ name, university, phone, email string }
+
+// studentDisplayMap loads name/university/phone/email for many students in two
+// queries total instead of two per student. Ids with no matching row are simply
+// absent from the map (callers read a zero-value studentDisplay for those).
+func (h *ApplicationController) studentDisplayMap(studentIDs []uint) map[uint]studentDisplay {
+	out := make(map[uint]studentDisplay, len(studentIDs))
+	if len(studentIDs) == 0 {
+		return out
+	}
+	var students []models.Student
+	h.db.Where("user_id IN ?", studentIDs).Find(&students)
+
+	userIDs := make([]uint, 0, len(students))
+	for _, s := range students {
+		userIDs = append(userIDs, s.UserID)
+	}
+	users := make(map[uint]models.User, len(userIDs))
+	if len(userIDs) > 0 {
+		var rows []models.User
+		h.db.Where("user_id IN ?", userIDs).Find(&rows)
+		for _, u := range rows {
+			users[u.UserID] = u
+		}
+	}
+
+	for _, s := range students {
+		u := users[s.UserID]
+		out[s.UserID] = studentDisplay{
+			name:       fmt.Sprintf("%s %s", s.FirstName, s.LastName),
+			university: s.University,
+			phone:      u.Phone,
+			email:      u.Email,
+		}
+	}
+	return out
+}
+
+// companyNameMap loads company_name for many employers in one query.
+func (h *ApplicationController) companyNameMap(employerIDs []uint) map[uint]string {
+	out := make(map[uint]string, len(employerIDs))
+	if len(employerIDs) == 0 {
+		return out
+	}
+	var rows []models.Employer
+	h.db.Select("user_id", "company_name").Where("user_id IN ?", employerIDs).Find(&rows)
+	for _, e := range rows {
+		out[e.UserID] = e.CompanyName
+	}
+	return out
 }
 
 func mapApplicationToResponse(app *models.Application, companyName, studentName, studentUniversity, studentPhone, studentEmail string) dto.ApplicationResponse {

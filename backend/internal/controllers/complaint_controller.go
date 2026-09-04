@@ -42,26 +42,32 @@ func (h *ComplaintController) Create(c *gin.Context) {
 		return
 	}
 
+	role, _ := utils.GetUserRoleFromContext(c)
 	complaint := &models.Complaint{
 		UserID:        userID,
 		Title:         payload.Title,
 		Description:   payload.Description,
 		ReferenceType: payload.ReferenceType,
 	}
-	if err := h.db.Create(complaint).Error; err != nil {
-		utils.JSONInternalError(c, "create failed", err)
-		return
-	}
-
-	role, _ := utils.GetUserRoleFromContext(c)
 	history := &models.ComplaintHistory{
-		ComplaintID:  complaint.ComplaintID,
 		Status:       "submitted",
 		ActionByRole: role,
 		Note:         "ได้รับเรื่องร้องเรียนเรียบร้อย",
 		Timestamp:    time.Now().UTC(),
 	}
-	h.db.Create(history)
+
+	// The complaint and its first history row are one unit — a complaint with
+	// no history renders as a blank timeline.
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(complaint).Error; err != nil {
+			return err
+		}
+		history.ComplaintID = complaint.ComplaintID
+		return tx.Create(history).Error
+	}); err != nil {
+		utils.JSONInternalError(c, "create failed", err)
+		return
+	}
 	complaint.Histories = []models.ComplaintHistory{*history}
 
 	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(complaint))
@@ -189,15 +195,19 @@ func (h *ComplaintController) AddHistory(c *gin.Context) {
 		Note:         payload.Note,
 		Timestamp:    time.Now().UTC(),
 	}
-	if err := h.db.Create(history).Error; err != nil {
-		utils.JSONInternalError(c, "update failed", err)
-		return
-	}
-
 	if payload.Status == "resolved" {
 		complaint.ResolutionDetail = payload.Note
 	}
-	h.db.Model(&models.Complaint{}).Where("id = ?", complaint.ComplaintID).Update("resolution_detail", complaint.ResolutionDetail)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(history).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.Complaint{}).Where("complaint_id = ?", complaint.ComplaintID).
+			Update("resolution_detail", complaint.ResolutionDetail).Error
+	}); err != nil {
+		utils.JSONInternalError(c, "update failed", err)
+		return
+	}
 
 	var submitter models.User
 	if h.db.First(&submitter, complaint.UserID).Error == nil {

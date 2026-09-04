@@ -35,7 +35,7 @@ func (h *EmployerController) GetMyProfile(c *gin.Context) {
 
     employer, err := h.findByUserID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "failed to load profile", err.Error())
+        utils.JSONInternalError(c, "failed to load profile", err)
         return
     }
     if employer == nil {
@@ -94,7 +94,7 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
 
     employer, err := h.findByUserID(userID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+        utils.JSONInternalError(c, "update failed", err)
         return
     }
 
@@ -107,7 +107,7 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
         utils.JSONError(c, http.StatusBadRequest, "update failed", "tax id already registered to another employer")
         return
     } else if !errors.Is(err, gorm.ErrRecordNotFound) {
-        utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+        utils.JSONInternalError(c, "update failed", err)
         return
     }
 
@@ -128,7 +128,7 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
 
     if isNew {
         if err := h.db.Create(employer).Error; err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            utils.JSONInternalError(c, "update failed", err)
             return
         }
         approve := &models.Approve{
@@ -137,13 +137,13 @@ func (h *EmployerController) UpsertMyProfile(c *gin.Context) {
             Status:       "pending",
         }
         if err := h.db.Create(approve).Error; err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            utils.JSONInternalError(c, "update failed", err)
             return
         }
         employer.Approve = approve
     } else {
         if err := h.db.Save(employer).Error; err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            utils.JSONInternalError(c, "update failed", err)
             return
         }
     }

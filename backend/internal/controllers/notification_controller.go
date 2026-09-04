@@ -38,7 +38,7 @@ func (h *NotificationController) ListMine(c *gin.Context) {
 
     var notifications []models.Notification
     if err := query.Find(&notifications).Error; err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "failed to load notifications", err.Error())
+        utils.JSONInternalError(c, "failed to load notifications", err)
         return
     }
 
@@ -60,7 +60,7 @@ func (h *NotificationController) UnreadCount(c *gin.Context) {
 
     var count int64
     if err := h.db.Model(&models.Notification{}).Where("user_id = ? AND is_read = ?", userID, false).Count(&count).Error; err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "failed to count notifications", err.Error())
+        utils.JSONInternalError(c, "failed to count notifications", err)
         return
     }
 
@@ -107,7 +107,7 @@ func (h *NotificationController) MarkAllRead(c *gin.Context) {
     if err := h.db.Model(&models.Notification{}).
         Where("user_id = ? AND is_read = ?", userID, false).
         Update("is_read", true).Error; err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "failed to update notifications", err.Error())
+        utils.JSONInternalError(c, "failed to update notifications", err)
         return
     }
 

@@ -148,7 +148,7 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 		Status:              "pending",
 	}
 	if err := h.db.Create(agreement).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *EmploymentController) ListMine(c *gin.Context) {
 			return
 		}
 		if err := h.db.Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&agreements).Error; err != nil {
-			utils.JSONError(c, http.StatusInternalServerError, "failed to load agreements", err.Error())
+			utils.JSONInternalError(c, "failed to load agreements", err)
 			return
 		}
 		responses := make([]dto.AgreementResponse, 0, len(agreements))
@@ -246,7 +246,7 @@ func (h *EmploymentController) ListMine(c *gin.Context) {
 		return
 	}
 	if err := h.db.Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&agreements).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load agreements", err.Error())
+		utils.JSONInternalError(c, "failed to load agreements", err)
 		return
 	}
 	responses := make([]dto.AgreementResponse, 0, len(agreements))
@@ -269,7 +269,7 @@ func (h *EmploymentController) Accept(c *gin.Context) {
 
 	agreement.Status = "accepted"
 	if err := h.db.Save(agreement).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+		utils.JSONInternalError(c, "update failed", err)
 		return
 	}
 
@@ -303,7 +303,7 @@ func (h *EmploymentController) Reject(c *gin.Context) {
 	agreement.Status = "rejected"
 	agreement.RejectReason = payload.Reason
 	if err := h.db.Save(agreement).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+		utils.JSONInternalError(c, "update failed", err)
 		return
 	}
 
@@ -324,7 +324,7 @@ func (h *EmploymentController) currentEmployer(c *gin.Context) (*models.Employer
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your company profile first")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}

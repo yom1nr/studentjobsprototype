@@ -338,7 +338,7 @@ func (h *PayrollController) currentEmployer(c *gin.Context) (*models.Employer, b
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your company profile first")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}

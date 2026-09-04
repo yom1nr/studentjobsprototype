@@ -29,7 +29,7 @@ func NewJobpostController(db *gorm.DB) *JobpostController {
 func (h *JobpostController) ListOpenJobposts(c *gin.Context) {
 	var jobposts []models.Jobpost
 	if err := h.db.Where("status = ?", "open").Order("created_at DESC").Find(&jobposts).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load job posts", err.Error())
+		utils.JSONInternalError(c, "failed to load job posts", err)
 		return
 	}
 
@@ -50,7 +50,7 @@ func (h *JobpostController) GetJobpostDetail(c *gin.Context) {
 
 	jobpost, err := h.findByID(id)
 	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "failed to load job post", err.Error())
+		utils.JSONInternalError(c, "failed to load job post", err)
 		return
 	}
 	if jobpost == nil {
@@ -70,7 +70,7 @@ func (h *JobpostController) ListMyJobposts(c *gin.Context) {
 
 	var jobposts []models.Jobpost
 	if err := h.db.Where("user_id = ?", employer.UserID).Order("created_at DESC").Find(&jobposts).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load job posts", err.Error())
+		utils.JSONInternalError(c, "failed to load job posts", err)
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *JobpostController) CreateJobpost(c *gin.Context) {
 		Status:                  "open",
 	}
 	if err := h.db.Create(jobpost).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *JobpostController) UpdateJobpost(c *gin.Context) {
 	jobpost.Quantity = max(payload.Quantity, 1)
 
 	if err := h.db.Save(jobpost).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+		utils.JSONInternalError(c, "update failed", err)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (h *JobpostController) CloseJobpost(c *gin.Context) {
 
 	jobpost.Status = "closed"
 	if err := h.db.Save(jobpost).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "close failed", err.Error())
+		utils.JSONInternalError(c, "close failed", err)
 		return
 	}
 
@@ -225,7 +225,7 @@ func (h *JobpostController) DeleteJobpost(c *gin.Context) {
 	if len(interviewIDs) > 0 {
 		var hires int64
 		if err := h.db.Model(&models.EmploymentAgreement{}).Where("interview_schedule_id IN ?", interviewIDs).Count(&hires).Error; err != nil {
-			utils.JSONError(c, http.StatusBadRequest, "delete failed", err.Error())
+			utils.JSONInternalError(c, "delete failed", err)
 			return
 		}
 		if hires > 0 {
@@ -279,7 +279,7 @@ func (h *JobpostController) currentEmployer(c *gin.Context) (*models.Employer, b
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your company profile before managing job posts")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}
@@ -296,7 +296,7 @@ func (h *JobpostController) ownedJobpost(c *gin.Context, employerID uint) (*mode
 
 	jobpost, err := h.findByID(id)
 	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "failed to load job post", err.Error())
+		utils.JSONInternalError(c, "failed to load job post", err)
 		return nil, false
 	}
 	if jobpost == nil || jobpost.UserID != employerID {

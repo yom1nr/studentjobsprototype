@@ -101,7 +101,7 @@ func (h *UserController) UpdateProfile(c *gin.Context) {
             return
         }
         if err := utils.ValidatePasswordStrength(payload.Password); err != nil {
-            utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+            utils.JSONInternalError(c, "update failed", err)
             return
         }
 

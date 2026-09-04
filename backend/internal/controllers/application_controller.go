@@ -48,7 +48,7 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusNotFound, "job post not found", "no job post exists with the given id")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+			utils.JSONInternalError(c, "create failed", err)
 		}
 		return
 	}
@@ -77,7 +77,7 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "create failed", "you have already applied to this job post")
 		return
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *ApplicationController) CreateApplication(c *gin.Context) {
 		Status:    "pending",
 	}
 	if err := h.db.Create(application).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 	application.Jobpost = jobpost
@@ -116,7 +116,7 @@ func (h *ApplicationController) ListMyApplications(c *gin.Context) {
 		Where("student_id = ?", student.UserID).
 		Order("created_at DESC").
 		Find(&applications).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load applications", err.Error())
+		utils.JSONInternalError(c, "failed to load applications", err)
 		return
 	}
 
@@ -241,7 +241,7 @@ func (h *ApplicationController) ListEmployerApplications(c *gin.Context) {
 		query = query.Where("1 = 0")
 	}
 	if err := query.Find(&applications).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load applications", err.Error())
+		utils.JSONInternalError(c, "failed to load applications", err)
 		return
 	}
 
@@ -344,7 +344,7 @@ func (h *ApplicationController) ListAdminApplications(c *gin.Context) {
 		Where("status = ?", "accepted").
 		Order("created_at DESC").
 		Find(&applications).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load applications", err.Error())
+		utils.JSONInternalError(c, "failed to load applications", err)
 		return
 	}
 
@@ -403,7 +403,7 @@ func (h *ApplicationController) VerifyApplication(c *gin.Context) {
 		CheckedAt:     time.Now().UTC(),
 	}
 	if err := h.db.Create(audit).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "verification failed", err.Error())
+		utils.JSONInternalError(c, "verification failed", err)
 		return
 	}
 	application.Audits = append(application.Audits, *audit)
@@ -446,7 +446,7 @@ func (h *ApplicationController) DeleteApplication(c *gin.Context) {
 	if len(interviewIDs) > 0 {
 		var hires int64
 		if err := h.db.Model(&models.EmploymentAgreement{}).Where("interview_schedule_id IN ?", interviewIDs).Count(&hires).Error; err != nil {
-			utils.JSONError(c, http.StatusBadRequest, "delete failed", err.Error())
+			utils.JSONInternalError(c, "delete failed", err)
 			return
 		}
 		if hires > 0 {
@@ -495,7 +495,7 @@ func (h *ApplicationController) loadApplicationForAdmin(c *gin.Context) (*models
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusNotFound, "application not found", "no application exists with the given id")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "failed to load application", err.Error())
+			utils.JSONInternalError(c, "failed to load application", err)
 		}
 		return nil, false
 	}
@@ -514,7 +514,7 @@ func (h *ApplicationController) currentAdmin(c *gin.Context) (*models.Admin, boo
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "admin profile not found for current user")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}
@@ -533,7 +533,7 @@ func (h *ApplicationController) currentStudent(c *gin.Context) (*models.Student,
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile before applying to jobs")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}
@@ -552,7 +552,7 @@ func (h *ApplicationController) currentEmployer(c *gin.Context) (*models.Employe
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your company profile first")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}
@@ -575,7 +575,7 @@ func (h *ApplicationController) ownedByEmployer(c *gin.Context, employerID uint)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusNotFound, "application not found", "no application exists with the given id")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "failed to load application", err.Error())
+			utils.JSONInternalError(c, "failed to load application", err)
 		}
 		return nil, false
 	}

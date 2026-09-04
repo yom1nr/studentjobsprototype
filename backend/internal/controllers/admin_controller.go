@@ -40,7 +40,7 @@ func (h *AdminController) ListEmployerApprovals(c *gin.Context) {
         Preload("Employer.AttachmentEmployer").
         Where("role = ?", "employer").
         Find(&users).Error; err != nil {
-        utils.JSONError(c, http.StatusInternalServerError, "failed to load employers", err.Error())
+        utils.JSONInternalError(c, "failed to load employers", err)
         return
     }
 
@@ -74,7 +74,7 @@ func (h *AdminController) GetEmployerDetail(c *gin.Context) {
 
     employer, err := h.findEmployerByID(employerID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "failed to load employer", err.Error())
+        utils.JSONInternalError(c, "failed to load employer", err)
         return
     }
     if employer == nil {
@@ -84,7 +84,7 @@ func (h *AdminController) GetEmployerDetail(c *gin.Context) {
 
     var user models.User
     if err := h.db.First(&user, employer.UserID).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "failed to load employer", err.Error())
+        utils.JSONInternalError(c, "failed to load employer", err)
         return
     }
 
@@ -106,7 +106,7 @@ func (h *AdminController) ApproveEmployer(c *gin.Context) {
 
     employer, err := h.findEmployerByID(employerID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "approval failed", err.Error())
+        utils.JSONInternalError(c, "approval failed", err)
         return
     }
     if employer == nil || employer.Approve == nil {
@@ -117,7 +117,7 @@ func (h *AdminController) ApproveEmployer(c *gin.Context) {
     employer.Approve.Status = "approved"
     employer.Approve.AdminID = &admin.UserID
     if err := h.db.Save(employer.Approve).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "approval failed", err.Error())
+        utils.JSONInternalError(c, "approval failed", err)
         return
     }
 
@@ -152,7 +152,7 @@ func (h *AdminController) RejectEmployer(c *gin.Context) {
 
     employer, err := h.findEmployerByID(employerID)
     if err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "rejection failed", err.Error())
+        utils.JSONInternalError(c, "rejection failed", err)
         return
     }
     if employer == nil || employer.Approve == nil {
@@ -163,7 +163,7 @@ func (h *AdminController) RejectEmployer(c *gin.Context) {
     employer.Approve.Status = "rejected"
     employer.Approve.AdminID = &admin.UserID
     if err := h.db.Save(employer.Approve).Error; err != nil {
-        utils.JSONError(c, http.StatusBadRequest, "rejection failed", err.Error())
+        utils.JSONInternalError(c, "rejection failed", err)
         return
     }
 
@@ -232,7 +232,7 @@ func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             utils.JSONError(c, http.StatusBadRequest, "action failed", "admin profile not found for current user")
         } else {
-            utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+            utils.JSONInternalError(c, "action failed", err)
         }
         return nil, false
     }

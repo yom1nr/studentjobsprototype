@@ -56,7 +56,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusNotFound, "application not found", "no application of yours exists with the given id")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+			utils.JSONInternalError(c, "create failed", err)
 		}
 		return
 	}
@@ -85,7 +85,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "create failed", "this application already has an interview — edit that appointment instead")
 		return
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 
@@ -107,7 +107,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		PreparationDetails: payload.PreparationDetails,
 	}
 	if err := h.db.Create(interview).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 			return
 		}
 		if err := h.db.Preload("Reschedules").Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
-			utils.JSONError(c, http.StatusInternalServerError, "failed to load interviews", err.Error())
+			utils.JSONInternalError(c, "failed to load interviews", err)
 			return
 		}
 		responses := make([]dto.InterviewResponse, 0, len(interviews))
@@ -152,7 +152,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		return
 	}
 	if err := h.db.Preload("Reschedules").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load interviews", err.Error())
+		utils.JSONInternalError(c, "failed to load interviews", err)
 		return
 	}
 	responses := make([]dto.InterviewResponse, 0, len(interviews))
@@ -205,7 +205,7 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 	interview.Location = payload.Location
 	interview.PreparationDetails = payload.PreparationDetails
 	if err := h.db.Save(interview).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+		utils.JSONInternalError(c, "update failed", err)
 		return
 	}
 
@@ -537,7 +537,7 @@ func (h *InterviewController) ListReschedules(c *gin.Context) {
 	}
 	var reschedules []models.RescheduleInterview
 	if err := h.db.Where("interview_schedule_id = ?", interview.InterviewID).Order("created_at DESC").Find(&reschedules).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load reschedule history", err.Error())
+		utils.JSONInternalError(c, "failed to load reschedule history", err)
 		return
 	}
 	responses := make([]dto.RescheduleResponse, 0, len(reschedules))
@@ -587,7 +587,7 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 		"result_announced_at": &now,
 		"status":              "completed",
 	}).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+		utils.JSONInternalError(c, "action failed", err)
 		return
 	}
 
@@ -651,7 +651,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		"status":       "confirmed",
 		"confirmed_at": &confirmedAt,
 	}).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+		utils.JSONInternalError(c, "action failed", err)
 		return
 	}
 
@@ -680,7 +680,7 @@ func (h *InterviewController) currentEmployer(c *gin.Context) (*models.Employer,
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your company profile first")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}

@@ -54,7 +54,7 @@ func (h *TimeRecordController) CheckIn(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "check-in failed", "you already have an open time record")
 		return
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		utils.JSONError(c, http.StatusBadRequest, "check-in failed", err.Error())
+		utils.JSONInternalError(c, "check-in failed", err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h *TimeRecordController) CheckIn(c *gin.Context) {
 		RecordStatus: "active",
 	}
 	if err := h.db.Create(record).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "check-in failed", err.Error())
+		utils.JSONInternalError(c, "check-in failed", err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *TimeRecordController) CheckOut(c *gin.Context) {
 	record.CheckOutTime = &now
 	record.RecordStatus = "completed"
 	if err := h.db.Save(&record).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "check-out failed", err.Error())
+		utils.JSONInternalError(c, "check-out failed", err)
 		return
 	}
 
@@ -212,7 +212,7 @@ func (h *TimeRecordController) CreateEditRequest(c *gin.Context) {
 		RequestStatus:   "pending",
 	}
 	if err := h.db.Create(editRequest).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "request failed", err.Error())
+		utils.JSONInternalError(c, "request failed", err)
 		return
 	}
 
@@ -325,7 +325,7 @@ func (h *TimeRecordController) RejectEditRequest(c *gin.Context) {
 
 	editRequest.RequestStatus = "rejected"
 	if err := h.db.Save(editRequest).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "reject failed", err.Error())
+		utils.JSONInternalError(c, "reject failed", err)
 		return
 	}
 
@@ -369,7 +369,7 @@ func (h *TimeRecordController) currentEmployer(c *gin.Context) (*models.Employer
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your company profile first")
 		} else {
-			utils.JSONError(c, http.StatusBadRequest, "action failed", err.Error())
+			utils.JSONInternalError(c, "action failed", err)
 		}
 		return nil, false
 	}

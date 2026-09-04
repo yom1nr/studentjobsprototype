@@ -49,7 +49,7 @@ func (h *ComplaintController) Create(c *gin.Context) {
 		ReferenceType: payload.ReferenceType,
 	}
 	if err := h.db.Create(complaint).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "create failed", err.Error())
+		utils.JSONInternalError(c, "create failed", err)
 		return
 	}
 
@@ -77,7 +77,7 @@ func (h *ComplaintController) ListMine(c *gin.Context) {
 
 	var complaints []models.Complaint
 	if err := h.db.Preload("Histories").Preload("Attachments").Where("user_id = ?", userID).Order("created_at DESC").Find(&complaints).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load complaints", err.Error())
+		utils.JSONInternalError(c, "failed to load complaints", err)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *ComplaintController) ListMine(c *gin.Context) {
 func (h *ComplaintController) ListAll(c *gin.Context) {
 	var complaints []models.Complaint
 	if err := h.db.Preload("Histories").Preload("Attachments").Order("created_at DESC").Find(&complaints).Error; err != nil {
-		utils.JSONError(c, http.StatusInternalServerError, "failed to load complaints", err.Error())
+		utils.JSONInternalError(c, "failed to load complaints", err)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (h *ComplaintController) AddAttachment(c *gin.Context) {
 		FileSize:    payload.FileSize,
 	}
 	if err := h.db.Create(attachment).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "upload failed", err.Error())
+		utils.JSONInternalError(c, "upload failed", err)
 		return
 	}
 
@@ -190,7 +190,7 @@ func (h *ComplaintController) AddHistory(c *gin.Context) {
 		Timestamp:    time.Now().UTC(),
 	}
 	if err := h.db.Create(history).Error; err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "update failed", err.Error())
+		utils.JSONInternalError(c, "update failed", err)
 		return
 	}
 

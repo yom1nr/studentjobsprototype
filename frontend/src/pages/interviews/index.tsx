@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Box, Button, Chip, Dialog, IconButton, TextField, Typography } from '@mui/material'
 import EventOutlinedIcon from '@mui/icons-material/EventOutlined'
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined'
@@ -16,7 +16,7 @@ import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import MailOutlineIcon from '@mui/icons-material/MailOutlineOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import SentimentDissatisfiedOutlinedIcon from '@mui/icons-material/SentimentDissatisfiedOutlined'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
 import { ErrorAlert } from '../../components/ErrorAlert'
@@ -53,6 +53,27 @@ function formatSlot(rfc3339: string): string {
 
 function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
+}
+
+/** Which of the student's interviews to put on screen. A deep link from a
+ *  notification (?interview=<id>) wins; then the one that needs an answer
+ *  (mid-reschedule); then any still-live one; then the most recent. Without
+ *  this the page always showed interviews[0], so a student with more than one
+ *  appointment could not see or act on a reschedule for any of the others. */
+function pickInterview(
+  list: InterviewScheduleRecord[],
+  targetId: number | null,
+): InterviewScheduleRecord | null {
+  if (!list.length) return null
+  if (targetId != null) {
+    const hit = list.find((i) => i.id === targetId)
+    if (hit) return hit
+  }
+  return (
+    list.find((i) => i.status === 'rescheduling') ??
+    list.find((i) => i.status !== 'completed' && i.status !== 'cancelled' && i.result === '') ??
+    list[0]
+  )
 }
 
 function StepCard({
@@ -150,6 +171,8 @@ function StudentInterviewsView() {
   usePageTitle('ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์')
   const { token } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const targetInterviewId = Number(searchParams.get('interview')) || null
 
   const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -179,16 +202,7 @@ function StudentInterviewsView() {
       setLoading(true)
       try {
         const data = await listMyInterviews(token!)
-        if (cancelled) return
-        setInterviews(data)
-        // The appointment alone doesn't say whether an answer is outstanding, so
-        // pull the request history that goes with it.
-        if (data[0]) {
-          const rs = await listReschedules(token!, data[0].id)
-          if (!cancelled) setReschedules(rs)
-        } else if (!cancelled) {
-          setReschedules([])
-        }
+        if (!cancelled) setInterviews(data)
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err, 'โหลดข้อมูลนัดสัมภาษณ์ไม่สำเร็จ'))
       } finally {
@@ -199,7 +213,31 @@ function StudentInterviewsView() {
     return () => { cancelled = true }
   }, [token, reloadToken])
 
-  const interview = interviews[0] ?? null
+  const interview = useMemo(
+    () => pickInterview(interviews, targetInterviewId),
+    [interviews, targetInterviewId],
+  )
+
+  // The request history follows whichever interview is on screen — not always
+  // the first — so a student with several appointments sees the one that needs
+  // them, and the notification deep link lands on the right request.
+  useEffect(() => {
+    let cancelled = false
+    async function loadReschedules() {
+      if (!token || !interview) {
+        if (!cancelled) setReschedules([])
+        return
+      }
+      try {
+        const rs = await listReschedules(token, interview.id)
+        if (!cancelled) setReschedules(rs)
+      } catch {
+        if (!cancelled) setReschedules([])
+      }
+    }
+    void loadReschedules()
+    return () => { cancelled = true }
+  }, [token, interview, reloadToken])
 
   // The appointment's real state lives on the record (pending / confirmed /
   // rescheduling / completed / cancelled). `confirmed` below is only an optimistic

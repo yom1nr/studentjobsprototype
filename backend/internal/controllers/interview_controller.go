@@ -212,6 +212,22 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(interview, employer.CompanyName, h.studentName(interview.StudentID)))
 }
 
+// utcInstant parses an RFC3339 timestamp and requires a UTC offset ("Z" or
+// "+00:00"). Reschedule times are stored and shown as their literal wall-clock
+// digits with no zone conversion, so a value carrying a real offset —
+// 13:30+07:00 — would be saved as 06:30 and read back as the wrong time by
+// everyone. Rejecting it here keeps that convention enforced, not assumed.
+func utcInstant(raw string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if _, offset := t.Zone(); offset != 0 {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
+}
+
 // RequestReschedule lets either party (employer or student, based on the caller's
 // role) propose a change to an existing interview. Every call is recorded as a
 // new RescheduleInterview history entry and notifies the other party.
@@ -270,23 +286,22 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		}
 		slots := make([]string, 0, len(payload.ProposedSlots))
 		for _, raw := range payload.ProposedSlots {
-			t, err := time.Parse(time.RFC3339, raw)
-			if err != nil {
-				utils.JSONError(c, http.StatusBadRequest, "request failed", "each proposed slot must be RFC3339, e.g. 2026-09-20T13:30:00Z")
+			t, valid := utcInstant(raw)
+			if !valid {
+				utils.JSONError(c, http.StatusBadRequest, "request failed", "each proposed slot must be RFC3339 in UTC, e.g. 2026-09-20T13:30:00Z")
 				return
 			}
-			slots = append(slots, t.UTC().Format(time.RFC3339))
+			slots = append(slots, t.Format(time.RFC3339))
 		}
 		reschedule.ProposedSlots = strings.Join(slots, ",")
 	} else {
 		// The student names the single time they want; the employer decides.
-		t, err := time.Parse(time.RFC3339, payload.StudentAvailableDateTime)
-		if err != nil {
-			utils.JSONError(c, http.StatusBadRequest, "request failed", "student_available_date_time must be RFC3339, e.g. 2026-09-20T13:30:00Z")
+		t, valid := utcInstant(payload.StudentAvailableDateTime)
+		if !valid {
+			utils.JSONError(c, http.StatusBadRequest, "request failed", "student_available_date_time must be RFC3339 in UTC, e.g. 2026-09-20T13:30:00Z")
 			return
 		}
-		utc := t.UTC()
-		reschedule.StudentAvailableDateTime = &utc
+		reschedule.StudentAvailableDateTime = &t
 	}
 
 	if err := h.db.Create(reschedule).Error; err != nil {
@@ -468,13 +483,13 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
 		return
 	}
-	chosen, err := time.Parse(time.RFC3339, payload.SelectedDateTime)
-	if err != nil {
-		utils.JSONError(c, http.StatusBadRequest, "action failed", "selected_date_time must be RFC3339")
+	chosen, valid := utcInstant(payload.SelectedDateTime)
+	if !valid {
+		utils.JSONError(c, http.StatusBadRequest, "action failed", "selected_date_time must be RFC3339 in UTC")
 		return
 	}
 	// Only a time the employer actually offered may be chosen.
-	normalised := chosen.UTC().Format(time.RFC3339)
+	normalised := chosen.Format(time.RFC3339)
 	offered := false
 	for _, s := range strings.Split(reschedule.ProposedSlots, ",") {
 		if s == normalised {

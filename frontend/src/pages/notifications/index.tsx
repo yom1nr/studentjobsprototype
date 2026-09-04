@@ -360,7 +360,11 @@ export default function NotificationsPage() {
                       size="small"
                       onClick={() => {
                         if (!n.is_read) void markRead(n.id)
-                        navigate(presentation.actionPath)
+                        navigate(
+                          n.interview_schedule_id != null
+                            ? `${presentation.actionPath}?interview=${n.interview_schedule_id}`
+                            : presentation.actionPath,
+                        )
                       }}
                       sx={{ bgcolor: colors.navy, color: '#fff', textTransform: 'none', borderRadius: '20px', px: 2, mt: 1, '&:hover': { bgcolor: '#000226' } }}
                     >

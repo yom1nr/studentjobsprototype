@@ -241,7 +241,7 @@ func (h *JobpostController) DeleteJobpost(c *gin.Context) {
 			if err := tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.Notification{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.RescheduleInterview{}).Error; err != nil {
+			if err := deleteReschedulesForInterviews(tx, interviewIDs); err != nil {
 				return err
 			}
 			if err := tx.Where("interview_id IN ?", interviewIDs).Delete(&models.InterviewSchedule{}).Error; err != nil {

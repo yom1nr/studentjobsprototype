@@ -61,12 +61,6 @@ type RescheduleInterview struct {
 	// student | employer
 	RequestedBy string `gorm:"size:20;not null;default:'student'" json:"requested_by"`
 
-	// ProposedSlots holds the employer's offered times as comma-separated RFC3339
-	// values. Only the employer flow fills it: the employer offers a few slots and
-	// the student picks one, so there is nothing for the employer to approve
-	// afterwards. Empty for student-initiated requests.
-	ProposedSlots string `gorm:"type:text" json:"proposed_slots"`
-
 	// Status of the request itself. pending | accepted | rejected
 	Status string `gorm:"size:50;not null;default:'pending'" json:"status"`
 
@@ -75,8 +69,24 @@ type RescheduleInterview struct {
 	// employer's slots. Nil while the request is still pending.
 	RespondedAt *time.Time `json:"responded_at"`
 
-	// Relations
-	Notifications []Notification `gorm:"foreignKey:RescheduleInterviewID" json:"notifications,omitempty"`
+	// Relations. ProposedSlots is filled only by the employer flow — the
+	// employer offers a few times and the student picks one, so there is
+	// nothing for the employer to approve afterwards. Empty for
+	// student-initiated requests.
+	ProposedSlots []RescheduleProposedSlot `gorm:"foreignKey:RescheduleInterviewID" json:"proposed_slots,omitempty"`
+	Notifications []Notification           `gorm:"foreignKey:RescheduleInterviewID" json:"notifications,omitempty"`
+}
+
+// RescheduleProposedSlot is one time an employer offered as part of a
+// RescheduleInterview (RequestedBy="employer"). Previously these were joined
+// into a single comma-separated text column on RescheduleInterview, which
+// couldn't be queried or indexed per slot and relied on an exact string match
+// (RFC3339 formatting included) to detect which one the student picked; a
+// real column and a timestamptz equality check do that natively.
+type RescheduleProposedSlot struct {
+	SlotID                uint      `gorm:"primaryKey" json:"slot_id"`
+	RescheduleInterviewID uint      `gorm:"not null;index" json:"reschedule_interview_id"`
+	SlotAt                time.Time `gorm:"not null;index" json:"slot_at"`
 }
 
 // EmploymentAgreement is the contract between a Student and an Employer.

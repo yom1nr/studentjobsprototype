@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -135,7 +136,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := h.db.Preload("Reschedules").Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
+		if err := h.db.Preload("Reschedules.ProposedSlots").Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
 			utils.JSONInternalError(c, "failed to load interviews", err)
 			return
 		}
@@ -152,7 +153,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
-	if err := h.db.Preload("Reschedules").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
+	if err := h.db.Preload("Reschedules.ProposedSlots").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load interviews", err)
 		return
 	}
@@ -232,6 +233,25 @@ func utcInstant(raw string) (time.Time, bool) {
 	return t.UTC(), true
 }
 
+// deleteReschedulesForInterviews removes every RescheduleInterview row (and
+// its RescheduleProposedSlot children) for the given interviews. Used by the
+// application/jobpost delete flows that cascade through InterviewSchedule
+// rows — DisableForeignKeyConstraintWhenMigrating means nothing does this for
+// free at the database level, so each cascade has to do it explicitly.
+func deleteReschedulesForInterviews(tx *gorm.DB, interviewIDs []uint) error {
+	var rescheduleIDs []uint
+	if err := tx.Model(&models.RescheduleInterview{}).Where("interview_schedule_id IN ?", interviewIDs).
+		Pluck("reschedule_id", &rescheduleIDs).Error; err != nil {
+		return err
+	}
+	if len(rescheduleIDs) > 0 {
+		if err := tx.Where("reschedule_interview_id IN ?", rescheduleIDs).Delete(&models.RescheduleProposedSlot{}).Error; err != nil {
+			return err
+		}
+	}
+	return tx.Where("interview_schedule_id IN ?", interviewIDs).Delete(&models.RescheduleInterview{}).Error
+}
+
 // openReschedulePending reports whether the interview already has an
 // unanswered reschedule request — a second one would leave whichever gets
 // settled first silently invalidating the other.
@@ -247,13 +267,27 @@ func (h *InterviewController) openReschedulePending(interviewID uint) (bool, err
 	return false, err
 }
 
-// createReschedule inserts the request and flips the interview to
-// "rescheduling". If the pre-insert openReschedulePending check above raced
-// another request and lost, the partial unique index on
-// (interview_schedule_id) WHERE status='pending' (#6) rejects the insert;
-// that is mapped back to the same message the check gives in the common case.
-func (h *InterviewController) createReschedule(c *gin.Context, interview *models.InterviewSchedule, reschedule *models.RescheduleInterview) bool {
-	if err := h.db.Create(reschedule).Error; err != nil {
+// createReschedule inserts the request, runs extra (if given) in the same
+// transaction — the employer flow uses it to insert the offered
+// RescheduleProposedSlot rows once reschedule.RescheduleID is known — and
+// flips the interview to "rescheduling". If the pre-insert
+// openReschedulePending check above raced another request and lost, the
+// partial unique index on (interview_schedule_id) WHERE status='pending' (#6)
+// rejects the insert; that is mapped back to the same message the check gives
+// in the common case.
+func (h *InterviewController) createReschedule(c *gin.Context, interview *models.InterviewSchedule, reschedule *models.RescheduleInterview, extra func(tx *gorm.DB) error) bool {
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(reschedule).Error; err != nil {
+			return err
+		}
+		if extra != nil {
+			if err := extra(tx); err != nil {
+				return err
+			}
+		}
+		return tx.Model(interview).Update("status", "rescheduling").Error
+	})
+	if err != nil {
 		if utils.IsUniqueViolation(err) {
 			utils.JSONError(c, http.StatusBadRequest, "request failed", "there is already a reschedule request waiting for an answer")
 			return false
@@ -261,7 +295,6 @@ func (h *InterviewController) createReschedule(c *gin.Context, interview *models
 		utils.JSONInternalError(c, "request failed", err)
 		return false
 	}
-	h.db.Model(interview).Update("status", "rescheduling")
 	return true
 }
 
@@ -312,7 +345,7 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		Status:                   "pending",
 		StudentAvailableDateTime: &t,
 	}
-	if !h.createReschedule(c, interview, reschedule) {
+	if !h.createReschedule(c, interview, reschedule, nil) {
 		return
 	}
 
@@ -365,14 +398,14 @@ func (h *InterviewController) OfferRescheduleSlots(c *gin.Context) {
 
 	// Store the offered times normalised so the student's later pick can be
 	// matched exactly against the list.
-	slots := make([]string, 0, len(payload.ProposedSlots))
+	slots := make([]time.Time, 0, len(payload.ProposedSlots))
 	for _, raw := range payload.ProposedSlots {
 		t, valid := utcInstant(raw)
 		if !valid {
 			utils.JSONError(c, http.StatusBadRequest, "request failed", "each proposed slot must be RFC3339 in UTC, e.g. 2026-09-20T13:30:00Z")
 			return
 		}
-		slots = append(slots, t.Format(time.RFC3339))
+		slots = append(slots, t)
 	}
 
 	reschedule := &models.RescheduleInterview{
@@ -380,11 +413,24 @@ func (h *InterviewController) OfferRescheduleSlots(c *gin.Context) {
 		RescheduleReason:    payload.Reason,
 		RequestedBy:         "employer",
 		Status:              "pending",
-		ProposedSlots:       strings.Join(slots, ","),
 	}
-	if !h.createReschedule(c, interview, reschedule) {
+	// Inserted alongside reschedule in the same transaction (createReschedule's
+	// extra), once reschedule.RescheduleID exists to reference — then assigned
+	// back onto reschedule.ProposedSlots here for the response mapped below,
+	// without a second round trip to read them back.
+	slotRows := make([]models.RescheduleProposedSlot, 0, len(slots))
+	if !h.createReschedule(c, interview, reschedule, func(tx *gorm.DB) error {
+		for _, s := range slots {
+			slotRows = append(slotRows, models.RescheduleProposedSlot{RescheduleInterviewID: reschedule.RescheduleID, SlotAt: s})
+		}
+		if len(slotRows) == 0 {
+			return nil
+		}
+		return tx.Create(&slotRows).Error
+	}) {
 		return
 	}
+	reschedule.ProposedSlots = slotRows
 
 	notifyAboutReschedule(h.db, interview.StudentID, "ผู้ประกอบการขอเลื่อนนัดสัมภาษณ์", "interview_reschedule_offer",
 		fmt.Sprintf("%s เสนอวันสัมภาษณ์ใหม่ %d วันให้เลือก — กรุณาเลือกวันที่สะดวก%s",
@@ -530,7 +576,7 @@ func (h *InterviewController) RespondToReschedule(c *gin.Context, approve bool) 
 			interview.InterviewID, reschedule.RescheduleID)
 	}
 
-	h.db.First(&reschedule, reschedule.RescheduleID)
+	h.db.Preload("ProposedSlots").First(&reschedule, reschedule.RescheduleID)
 	utils.JSONSuccess(c, http.StatusOK, mapRescheduleToResponse(&reschedule))
 }
 
@@ -588,16 +634,17 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "selected_date_time must be RFC3339 in UTC")
 		return
 	}
-	// Only a time the employer actually offered may be chosen.
-	normalised := chosen.Format(time.RFC3339)
-	offered := false
-	for _, s := range strings.Split(reschedule.ProposedSlots, ",") {
-		if s == normalised {
-			offered = true
-			break
-		}
+	// Only a time the employer actually offered may be chosen. timestamptz
+	// equality in Postgres compares by absolute instant, so this doesn't need
+	// the exact-string-match care the old comma-joined column did.
+	var offeredCount int64
+	if err := h.db.Model(&models.RescheduleProposedSlot{}).
+		Where("reschedule_interview_id = ? AND slot_at = ?", reschedule.RescheduleID, chosen).
+		Count(&offeredCount).Error; err != nil {
+		utils.JSONInternalError(c, "action failed", err)
+		return
 	}
-	if !offered {
+	if offeredCount == 0 {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "pick one of the dates the employer offered")
 		return
 	}
@@ -625,7 +672,7 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		fmt.Sprintf("%s เลือกวันสัมภาษณ์เป็นวันที่ %s", h.studentName(interview.StudentID), utc.Format("2006-01-02 15:04")),
 		interview.InterviewID, reschedule.RescheduleID)
 
-	h.db.First(&reschedule, reschedule.RescheduleID)
+	h.db.Preload("ProposedSlots").First(&reschedule, reschedule.RescheduleID)
 	utils.JSONSuccess(c, http.StatusOK, mapRescheduleToResponse(&reschedule))
 }
 
@@ -636,7 +683,7 @@ func (h *InterviewController) ListReschedules(c *gin.Context) {
 		return
 	}
 	var reschedules []models.RescheduleInterview
-	if err := h.db.Where("interview_schedule_id = ?", interview.InterviewID).Order("created_at DESC").Find(&reschedules).Error; err != nil {
+	if err := h.db.Preload("ProposedSlots").Where("interview_schedule_id = ?", interview.InterviewID).Order("created_at DESC").Find(&reschedules).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load reschedule history", err)
 		return
 	}
@@ -893,9 +940,13 @@ func mapRescheduleToResponse(r *models.RescheduleInterview) dto.RescheduleRespon
 	if r.RespondedAt != nil {
 		respondedAt = r.RespondedAt.Format(time.RFC3339)
 	}
-	slots := []string{}
-	if r.ProposedSlots != "" {
-		slots = strings.Split(r.ProposedSlots, ",")
+	// Sorted chronologically regardless of read order — the child table carries
+	// no ordering guarantee of its own.
+	sortedSlots := append([]models.RescheduleProposedSlot(nil), r.ProposedSlots...)
+	sort.Slice(sortedSlots, func(i, j int) bool { return sortedSlots[i].SlotAt.Before(sortedSlots[j].SlotAt) })
+	slots := make([]string, 0, len(sortedSlots))
+	for _, s := range sortedSlots {
+		slots = append(slots, s.SlotAt.UTC().Format(time.RFC3339))
 	}
 	return dto.RescheduleResponse{
 		ID:                       r.RescheduleID,

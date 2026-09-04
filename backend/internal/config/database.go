@@ -55,6 +55,7 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
 		// Interview & agreement
 		&models.InterviewSchedule{},
 		&models.RescheduleInterview{},
+		&models.RescheduleProposedSlot{},
 		&models.EmploymentAgreement{},
 		&models.Document{},
 		// Time tracking & payroll
@@ -68,6 +69,10 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if err := dropObsoleteColumns(db); err != nil {
+		return nil, err
+	}
+
 	if err := ensureUniqueIndexes(db); err != nil {
 		return nil, err
 	}
@@ -78,6 +83,26 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+// dropObsoleteColumns removes columns that used to back a model field but no
+// longer do — AutoMigrate only ever adds columns, it never drops one that a
+// struct field stopped declaring, so a removed field leaves a dead column
+// behind unless something explicitly drops it.
+func dropObsoleteColumns(db *gorm.DB) error {
+	drops := []struct{ table, column string }{
+		// #11: was a comma-joined RFC3339 string; replaced by the
+		// reschedule_proposed_slots child table.
+		{"reschedule_interviews", "proposed_slots"},
+	}
+	for _, d := range drops {
+		if db.Migrator().HasColumn(d.table, d.column) {
+			if err := db.Migrator().DropColumn(d.table, d.column); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ensureUniqueIndexes creates the partial unique indexes GORM's struct tags

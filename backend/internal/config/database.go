@@ -115,9 +115,15 @@ func dropObsoleteColumns(db *gorm.DB) error {
 // utils.IsUniqueViolation), never two rows.
 func ensureUniqueIndexes(db *gorm.DB) error {
 	stmts := []string{
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_employment_agreements_interview_unique
+		// #10: a voided (soft-deleted) agreement must not keep blocking a new
+		// offer for the same interview, so it's excluded from this predicate.
+		// The predicate changed after this index's first release — DROP+CREATE
+		// rather than IF NOT EXISTS, which would silently keep the old one since
+		// the name alone already matches.
+		`DROP INDEX IF EXISTS idx_employment_agreements_interview_unique`,
+		`CREATE UNIQUE INDEX idx_employment_agreements_interview_unique
             ON employment_agreements (interview_schedule_id)
-            WHERE interview_schedule_id IS NOT NULL`,
+            WHERE interview_schedule_id IS NOT NULL AND status <> 'void'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_reschedule_interviews_pending_unique
             ON reschedule_interviews (interview_schedule_id)
             WHERE status = 'pending'`,

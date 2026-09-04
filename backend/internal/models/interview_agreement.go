@@ -106,7 +106,11 @@ type EmploymentAgreement struct {
 	WorkingHours        string     `gorm:"size:100" json:"working_hours"`
 	LeavePolicy         string     `gorm:"type:text" json:"leave_policy"`
 	AdditionalTerms     string     `gorm:"type:text" json:"additional_terms"`
-	Status              string     `gorm:"size:50;not null;default:'pending'" json:"status"` // pending | accepted | rejected
+	// pending | accepted | rejected | void. "void" is a soft delete (#10):
+	// DeleteAgreement flips a rejected offer to void instead of removing the
+	// row, so what was offered and why it was declined stays on file — it's
+	// just excluded from ListMine and from the "one offer per interview" check.
+	Status       string `gorm:"size:50;not null;default:'pending'" json:"status"`
 	RejectReason        string     `gorm:"type:text" json:"reject_reason"`
 
 	// Belongs-to

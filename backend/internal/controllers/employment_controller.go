@@ -103,9 +103,10 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 	// One offer per interview, whatever became of it. A student who turned an
 	// offer down has answered for this position — re-sending it would let an
 	// employer put the same declined terms back in front of them repeatedly.
-	// Deleting the declined record is what frees the candidate up again.
+	// Voiding the declined record (DeleteAgreement) is what frees the
+	// candidate up again — void rows are excluded here since that's the point.
 	var prior models.EmploymentAgreement
-	err := h.db.Where("interview_schedule_id = ?", passedInterview.InterviewID).First(&prior).Error
+	err := h.db.Where("interview_schedule_id = ? AND status <> ?", passedInterview.InterviewID, "void").First(&prior).Error
 	if err == nil {
 		detail := "an employment agreement has already been sent for this interview"
 		if prior.Status == "rejected" {
@@ -174,13 +175,16 @@ func (h *EmploymentController) CreateAgreement(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(agreement, employer.CompanyName, h.studentName(student.UserID)))
 }
 
-// DeleteAgreement removes a declined offer from the employer's records.
+// DeleteAgreement clears a declined offer out of the employer's active
+// records so the same interview can be offered a fresh contract (#10).
 //
 // Only rejected drafts can go: a pending one is still awaiting the student's
 // answer, and an accepted one is a contract in force that time records and
-// payroll are billed against. Keeping a declined offer is the default — it
-// preserves what was offered and why it was turned down — so this exists for
-// clearing out drafts that should not be on file at all.
+// payroll are billed against. This is a soft delete — Status flips to "void"
+// rather than removing the row — so what was offered and why the student
+// turned it down stays on file if it's ever needed (a dispute, an audit); it
+// is just excluded from ListMine and from the "one offer per interview"
+// check, which is what actually frees the interview up to be offered again.
 func (h *EmploymentController) DeleteAgreement(c *gin.Context) {
 	employer, ok := h.currentEmployer(c)
 	if !ok {
@@ -212,15 +216,7 @@ func (h *EmploymentController) DeleteAgreement(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("employment_agreement_id = ?", agreement.AgreementID).Delete(&models.Notification{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("employment_agreement_id = ?", agreement.AgreementID).Delete(&models.Document{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&models.EmploymentAgreement{}, agreement.AgreementID).Error
-	}); err != nil {
+	if err := h.db.Model(&agreement).Update("status", "void").Error; err != nil {
 		utils.JSONInternalError(c, "delete failed", err)
 		return
 	}
@@ -244,7 +240,9 @@ func (h *EmploymentController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := h.db.Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&agreements).Error; err != nil {
+		// Voided offers (#10) are cleared drafts, not something either party
+		// still needs to see in their list.
+		if err := h.db.Where("employer_id = ? AND status <> ?", employer.UserID, "void").Order("created_at DESC").Find(&agreements).Error; err != nil {
 			utils.JSONInternalError(c, "failed to load agreements", err)
 			return
 		}
@@ -261,7 +259,7 @@ func (h *EmploymentController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
-	if err := h.db.Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&agreements).Error; err != nil {
+	if err := h.db.Where("student_id = ? AND status <> ?", student.UserID, "void").Order("created_at DESC").Find(&agreements).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load agreements", err)
 		return
 	}

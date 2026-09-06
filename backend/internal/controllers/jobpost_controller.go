@@ -35,9 +35,19 @@ func (h *JobpostController) ListOpenJobposts(c *gin.Context) {
 		return
 	}
 
+	employerIDs := make([]uint, 0, len(jobposts))
+	seen := make(map[uint]bool, len(jobposts))
+	for _, j := range jobposts {
+		if !seen[j.UserID] {
+			seen[j.UserID] = true
+			employerIDs = append(employerIDs, j.UserID)
+		}
+	}
+	companies := h.companyNameMap(employerIDs)
+
 	responses := make([]dto.JobpostResponse, 0, len(jobposts))
 	for _, j := range jobposts {
-		responses = append(responses, h.mapWithCompanyName(&j))
+		responses = append(responses, mapJobpostToResponse(&j, companies[j.UserID]))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -328,6 +338,21 @@ func (h *JobpostController) mapWithCompanyName(jobpost *models.Jobpost) dto.Jobp
 		companyName = employer.CompanyName
 	}
 	return mapJobpostToResponse(jobpost, companyName)
+}
+
+// companyNameMap loads company_name for many employers in one query, avoiding
+// an N+1 SELECT-per-jobpost when mapping a list of postings from mixed employers.
+func (h *JobpostController) companyNameMap(employerIDs []uint) map[uint]string {
+	out := make(map[uint]string, len(employerIDs))
+	if len(employerIDs) == 0 {
+		return out
+	}
+	var rows []models.Employer
+	h.db.Select("user_id", "company_name").Where("user_id IN ?", employerIDs).Find(&rows)
+	for _, e := range rows {
+		out[e.UserID] = e.CompanyName
+	}
+	return out
 }
 
 func mapJobpostToResponse(jobpost *models.Jobpost, companyName string) dto.JobpostResponse {

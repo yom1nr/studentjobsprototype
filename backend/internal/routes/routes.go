@@ -13,6 +13,7 @@ import (
 func SetupRouter(
 	db *gorm.DB,
 	jwtProvider utils.JWTProvider,
+	tokenRevoker utils.TokenRevoker,
 	authHandler *controllers.AuthController,
 	userHandler *controllers.UserController,
 	employerHandler *controllers.EmployerController,
@@ -36,13 +37,15 @@ func SetupRouter(
 
 	// One JWT middleware instance, verifying against the provider that issues
 	// tokens (not a re-read of the environment).
-	jwtAuth := middleware.JWTAuthMiddleware(jwtProvider)
+	jwtAuth := middleware.JWTAuthMiddleware(jwtProvider, tokenRevoker)
 
 	// Public Routes
 	api := router.Group("/api/v1")
 	auth := api.Group("/auth")
 	auth.POST("/register", authHandler.Register)
 	auth.POST("/login", authHandler.Login)
+	// Logout needs a valid token to know *which* token to revoke.
+	auth.POST("/logout", jwtAuth, authHandler.Logout)
 
 	// File upload — any authenticated user (profile images, employer docs, evidence)
 	api.POST("/upload", jwtAuth, uploadHandler.UploadFile)

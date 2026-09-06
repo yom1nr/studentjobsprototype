@@ -29,8 +29,9 @@ func main() {
     }
 
     jwtProvider := utils.NewJWTProvider(cfg.JWTSecret, cfg.JWTExpiresIn)
+    tokenRevoker := utils.NewTokenRevoker(db)
 
-    authController := controllers.NewAuthController(db, jwtProvider)
+    authController := controllers.NewAuthController(db, jwtProvider, tokenRevoker)
     userController := controllers.NewUserController(db)
     employerController := controllers.NewEmployerController(db)
     adminController := controllers.NewAdminController(db)
@@ -48,6 +49,7 @@ func main() {
     router := routes.SetupRouter(
         db,
         jwtProvider,
+        tokenRevoker,
         authController,
         userController,
         employerController,

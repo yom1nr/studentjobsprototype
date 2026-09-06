@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/SA/Golang-Backend-Example/internal/models"
+	"github.com/SA/Golang-Backend-Example/internal/utils"
 )
 
 // ConnectDatabase opens a PostgreSQL connection and runs migrations.
@@ -65,6 +66,8 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
 		&models.Payslip{},
 		// Notifications
 		&models.Notification{},
+		// Revoked JWTs (logout)
+		&models.RevokedToken{},
 	); err != nil {
 		return nil, err
 	}
@@ -74,6 +77,13 @@ func ConnectDatabase(cfg *Config) (*gorm.DB, error) {
 	}
 
 	if err := ensureUniqueIndexes(db); err != nil {
+		return nil, err
+	}
+
+	// Drop any revoked-token rows whose JWT would already be rejected on
+	// exp alone — see utils.PruneExpiredRevokedTokens. Run once at startup
+	// rather than as a background job; fine at this project's scale.
+	if err := utils.PruneExpiredRevokedTokens(db); err != nil {
 		return nil, err
 	}
 

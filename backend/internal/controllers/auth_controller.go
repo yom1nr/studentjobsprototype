@@ -24,14 +24,16 @@ const (
 type AuthController struct {
     db          *gorm.DB
     jwtProvider utils.JWTProvider
+    revoker     utils.TokenRevoker
     validate    *validator.Validate
 }
 
 // NewAuthController creates a new AuthController.
-func NewAuthController(db *gorm.DB, jwtProvider utils.JWTProvider) *AuthController {
+func NewAuthController(db *gorm.DB, jwtProvider utils.JWTProvider, revoker utils.TokenRevoker) *AuthController {
     return &AuthController{
         db:          db,
         jwtProvider: jwtProvider,
+        revoker:     revoker,
         validate:    validator.New(),
     }
 }
@@ -159,6 +161,33 @@ func (h *AuthController) Login(c *gin.Context) {
             UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
         },
     })
+}
+
+// Logout revokes the token that was presented, so it stops working
+// immediately instead of remaining valid until it naturally expires. Only
+// this one token/session is revoked — other devices/tabs stay logged in.
+func (h *AuthController) Logout(c *gin.Context) {
+    userID, ok := utils.GetUserIDFromContext(c)
+    if !ok {
+        utils.JSONError(c, http.StatusUnauthorized, "logout failed", "not authenticated")
+        return
+    }
+
+    jti, expiresAt, ok := utils.GetTokenClaimsFromContext(c)
+    if !ok {
+        // Token predates JTIs (issued before this feature shipped) — nothing
+        // to record, but logout still succeeds; it'll simply run out on its
+        // own natural expiry instead of being revoked early.
+        utils.JSONSuccess(c, http.StatusOK, gin.H{"message": "logged out"})
+        return
+    }
+
+    if err := h.revoker.Revoke(jti, userID, expiresAt); err != nil {
+        utils.JSONInternalError(c, "logout failed", err)
+        return
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, gin.H{"message": "logged out"})
 }
 
 // findByIdentifier looks a user up by email or username, so people can sign in

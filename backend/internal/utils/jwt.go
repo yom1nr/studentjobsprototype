@@ -1,6 +1,8 @@
 package utils
 
 import (
+    "crypto/rand"
+    "encoding/hex"
     "errors"
     "time"
 
@@ -9,6 +11,8 @@ import (
 
 const ContextUserIDKey = "user_id"
 const ContextUserRoleKey = "user_role"
+const ContextTokenJTIKey = "token_jti"
+const ContextTokenExpKey = "token_exp"
 
 // JWTProvider signs and validates JWT tokens.
 type JWTProvider struct {
@@ -29,12 +33,20 @@ func NewJWTProvider(secret string, expiresIn time.Duration) JWTProvider {
 }
 
 // GenerateToken creates a signed JWT token for a user, embedding their role so
-// role-gated routes don't need a DB lookup per request.
+// role-gated routes don't need a DB lookup per request. Each token gets a
+// random JTI (claims.ID) so a single token can be individually revoked
+// (logout) without invalidating the user's other sessions/devices.
 func (p JWTProvider) GenerateToken(userID uint, role string) (string, error) {
+    jti, err := newJTI()
+    if err != nil {
+        return "", err
+    }
+
     claims := JWTClaims{
         UserID: userID,
         Role:   role,
         RegisteredClaims: jwt.RegisteredClaims{
+            ID:        jti,
             IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
             ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(p.expiresIn)),
         },
@@ -42,6 +54,16 @@ func (p JWTProvider) GenerateToken(userID uint, role string) (string, error) {
 
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
     return token.SignedString([]byte(p.secret))
+}
+
+// newJTI returns a random 32-hex-char token id. crypto/rand is used (not a
+// UUID library) to avoid pulling in a new dependency for something this small.
+func newJTI() (string, error) {
+    buf := make([]byte, 16)
+    if _, err := rand.Read(buf); err != nil {
+        return "", err
+    }
+    return hex.EncodeToString(buf), nil
 }
 
 // ParseToken validates a token string against this provider's secret and
@@ -90,4 +112,21 @@ func GetUserRoleFromContext(c interface{ Get(any) (any, bool) }) (string, bool) 
 
     role, ok := raw.(string)
     return role, ok
+}
+
+// GetTokenClaimsFromContext reads the current request's token JTI and
+// expiry, as set by JWTAuthMiddleware. Used by logout to revoke exactly the
+// token that was presented, without re-parsing the Authorization header.
+func GetTokenClaimsFromContext(c interface{ Get(any) (any, bool) }) (jti string, expiresAt time.Time, ok bool) {
+    rawJTI, ok1 := c.Get(ContextTokenJTIKey)
+    rawExp, ok2 := c.Get(ContextTokenExpKey)
+    if !ok1 || !ok2 {
+        return "", time.Time{}, false
+    }
+    jti, ok1 = rawJTI.(string)
+    exp, ok2 := rawExp.(*jwt.NumericDate)
+    if !ok1 || !ok2 || exp == nil {
+        return "", time.Time{}, false
+    }
+    return jti, exp.Time, true
 }

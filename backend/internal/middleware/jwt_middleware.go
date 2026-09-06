@@ -9,8 +9,10 @@ import (
 )
 
 // JWTAuthMiddleware validates the JWT token and attaches the user ID to the
-// request context. It verifies against the same provider that issued the token.
-func JWTAuthMiddleware(provider utils.JWTProvider) gin.HandlerFunc {
+// request context. It verifies against the same provider that issued the
+// token, then checks revoker so a logged-out token stops working immediately
+// instead of remaining valid until its natural expiry.
+func JWTAuthMiddleware(provider utils.JWTProvider, revoker utils.TokenRevoker) gin.HandlerFunc {
     return func(c *gin.Context) {
         authHeader := c.GetHeader("Authorization")
         if authHeader == "" {
@@ -33,8 +35,16 @@ func JWTAuthMiddleware(provider utils.JWTProvider) gin.HandlerFunc {
             return
         }
 
+        if revoker.IsRevoked(claims.ID) {
+            utils.JSONError(c, http.StatusUnauthorized, "invalid token", "token has been revoked")
+            c.Abort()
+            return
+        }
+
         c.Set(utils.ContextUserIDKey, claims.UserID)
         c.Set(utils.ContextUserRoleKey, claims.Role)
+        c.Set(utils.ContextTokenJTIKey, claims.ID)
+        c.Set(utils.ContextTokenExpKey, claims.ExpiresAt)
         c.Next()
     }
 }

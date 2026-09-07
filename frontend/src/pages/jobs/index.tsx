@@ -557,7 +557,7 @@ function StudentJobSearchView() {
         </Button>
         <Button
           variant="contained"
-          sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: '#0088FF', px: 4, flexShrink: 0, '&:hover': { bgcolor: '#0070D6' } }}
+          sx={{ borderRadius: '20px', textTransform: 'none', bgcolor: '#1A2332', px: 4, flexShrink: 0, '&:hover': { bgcolor: '#0070D6' } }}
         >
           ค้นหา
         </Button>

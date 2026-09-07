@@ -177,6 +177,15 @@ const TYPE_PRESENTATION: Record<string, { icon: React.ReactNode; actionLabel: st
     actionLabel: 'ดูข้อมูลบัญชี',
     actionPath: '/settings',
   },
+  // Admin asked the employer to fix/add something before approval — the full
+  // note + an acknowledge button already live on the settings page (same
+  // place the employer edits the flagged info), so this just routes there
+  // rather than duplicating that detail view in a popup.
+  employer_request_doc: {
+    icon: <ReportProblemOutlinedIcon sx={{ color: '#0066CC' }} />,
+    actionLabel: 'ดูรายละเอียดที่ต้องแก้ไข',
+    actionPath: '/settings',
+  },
   // The employer offered times and the student has to pick one — the whole
   // interview is blocked until they do, so this gets a direct way in.
   interview_reschedule_offer: {

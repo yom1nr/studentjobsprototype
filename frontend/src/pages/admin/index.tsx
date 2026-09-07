@@ -34,7 +34,7 @@ const STATUS_TABS: { key: EmployerApprovalStatus; label: string }[] = [
 
 const STATUS_CHIP: Record<string, { label: string; color: 'warning' | 'success' | 'error' | 'info' }> = {
   pending: { label: 'รอการตรวจสอบ', color: 'warning' },
-  request_document: { label: 'ขอเอกสารเพิ่มเติม', color: 'info' },
+  request_document: { label: 'แก้ไขข้อมูล', color: 'info' },
   approved: { label: 'อนุมัติแล้ว', color: 'success' },
   rejected: { label: 'ไม่อนุมัติ', color: 'error' },
 }
@@ -156,7 +156,7 @@ export default function AdminEmployerApprovalsPage() {
   async function handleRequestDocuments() {
     if (!token || !selected) return
     if (docNote.trim().length === 0) {
-      setActionError('กรุณาระบุเอกสารหรือรายละเอียดที่ต้องการให้ผู้ประกอบการส่งเพิ่ม')
+      setActionError('กรุณาระบุรายละเอียดที่ต้องการให้แก้ไข หรือเอกสารที่ต้องการให้ส่งเพิ่ม')
       return
     }
     setDeciding(true)
@@ -307,8 +307,8 @@ export default function AdminEmployerApprovalsPage() {
                 )}
                 {requestingDocs && (
                   <TextField
-                    label="ระบุเอกสาร / รายละเอียดที่ต้องการให้ส่งเพิ่ม"
-                    placeholder="เช่น สำเนาบัตรประชาชนผู้มีอำนาจลงนาม, สำเนาทะเบียนบ้าน"
+                    label="ระบุรายละเอียดที่ต้องการให้แก้ไข หรือเอกสารที่ต้องการให้ส่งเพิ่ม"
+                    placeholder="เช่น สำเนาบัตรประชาชนผู้มีอำนาจลงนาม, สำเนาทะเบียนบ้าน, ชื่อบริษัทสะกดผิด"
                     value={docNote}
                     onChange={(e) => setDocNote(e.target.value)}
                     fullWidth
@@ -343,7 +343,7 @@ export default function AdminEmployerApprovalsPage() {
                         disabled={deciding}
                         sx={{ bgcolor: '#0066CC', textTransform: 'none', borderRadius: '20px', '&:hover': { bgcolor: '#0052A3' } }}
                       >
-                        ส่งคำขอเอกสาร
+                        ส่งคำขอแก้ไข
                       </Button>
                     </>
                   ) : (
@@ -358,7 +358,7 @@ export default function AdminEmployerApprovalsPage() {
                         onClick={() => setRequestingDocs(true)}
                         sx={{ bgcolor: '#E5F2FF', color: '#0066CC', textTransform: 'none', borderRadius: '20px', px: 2.5 }}
                       >
-                        ขอเอกสารเพิ่มเติม
+                        แก้ไขข้อมูล
                       </Button>
                       <Button
                         variant="contained"

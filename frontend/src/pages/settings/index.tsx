@@ -211,7 +211,7 @@ function UploadRow({
 
 const APPROVE_STATUS_LABEL: Record<string, { label: string; color: 'warning' | 'success' | 'error' | 'info' }> = {
   pending: { label: 'รอการอนุมัติ', color: 'warning' },
-  request_document: { label: 'ขอเอกสารเพิ่มเติม', color: 'info' },
+  request_document: { label: 'แก้ไขข้อมูล', color: 'info' },
   approved: { label: 'อนุมัติแล้ว', color: 'success' },
   rejected: { label: 'ไม่อนุมัติ', color: 'error' },
 }

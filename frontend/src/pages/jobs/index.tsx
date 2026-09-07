@@ -29,7 +29,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
-import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import FavoriteIcon from '@mui/icons-material/Favorite'
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder'
 import MyLocationOutlinedIcon from '@mui/icons-material/MyLocationOutlined'
@@ -37,7 +37,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { usePageTitle } from '../../components/usePageTitle'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { useAuth } from '../../auth/useAuth'
-import { ApiError } from '../../services/https'
+import { ApiError, getApiBaseUrl } from '../../services/https'
 import { closeJobpost, createJobpost, deleteJobpost, listMyJobposts, listOpenJobposts, updateJobpost } from '../../services/https/jobposts'
 import { createApplication } from '../../services/https/applications'
 import type { Jobpost, UpsertJobpostRequest } from '../../interface/IJobInterface'
@@ -230,6 +230,24 @@ function OutcomeDialog({
   )
 }
 
+// A job posting's "photo" is just the employer's own logo/shop photo
+// (there's no per-posting image upload — see CreateJobpost form below) —
+// falls back to a plain placeholder square when the employer hasn't
+// uploaded a logo yet.
+function JobThumb({ logo, size }: Readonly<{ logo: string; size: number }>) {
+  if (!logo) {
+    return <Box sx={{ width: size, height: size, borderRadius: '10px', bgcolor: colors.thumbBg, flexShrink: 0 }} />
+  }
+  return (
+    <Box
+      component="img"
+      src={`${getApiBaseUrl()}${logo}`}
+      alt=""
+      sx={{ width: size, height: size, borderRadius: '10px', flexShrink: 0, objectFit: 'cover', bgcolor: colors.thumbBg }}
+    />
+  )
+}
+
 // Renders a text field where the employer typed one item per line as a
 // bulleted list. Falls back to a single line for plain text.
 function DetailSection({ title, text }: Readonly<{ title: string; text: string }>) {
@@ -263,7 +281,7 @@ function JobDetailDialog({
           </Box>
 
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-            <Box sx={{ width: 64, height: 64, borderRadius: '10px', bgcolor: colors.thumbBg, flexShrink: 0 }} />
+            <JobThumb logo={job.company_logo} size={64} />
             <Box>
               <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>{job.position}</Typography>
               <Typography sx={{ fontSize: 14, color: colors.navy }}>{job.company_name}</Typography>
@@ -574,7 +592,7 @@ function StudentJobSearchView() {
                 '&:hover': { boxShadow: '0px 4px 16px rgba(0,0,0,0.08)' },
               }}
             >
-              <Box sx={{ width: 57, height: 57, borderRadius: '10px', bgcolor: colors.thumbBg, flexShrink: 0 }} />
+              <JobThumb logo={job.company_logo} size={57} />
               <Box sx={{ flex: 1 }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 20, color: colors.navy }}>{job.position}</Typography>
                 <Typography sx={{ fontSize: 16, color: colors.navy, mt: 0.5 }}>{job.company_name}</Typography>
@@ -938,23 +956,11 @@ function EmployerJobPostingsView() {
                   </IconButton>
                 </Box>
               </Box>
-              <Box
-                component="label"
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1.5,
-                  border: '1.5px dashed #B9C6DC',
-                  borderRadius: 3,
-                  p: 2,
-                  cursor: 'pointer',
-                }}
-              >
-                <input type="file" accept=".jpg,.jpeg,.png" hidden />
-                <CloudUploadOutlinedIcon sx={{ color: colors.navy }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 2, bgcolor: '#F7F9FC', borderRadius: 3 }}>
+                <InfoOutlinedIcon sx={{ color: colors.navy }} />
                 <Box>
-                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>รูปภาพ</Typography>
-                  <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>รองรับไฟล์ JPG, PNG (ขนาดไม่เกิน 5MB)</Typography>
+                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy }}>รูปภาพประกาศงาน</Typography>
+                  <Typography sx={{ fontSize: 11, color: '#9AA0A6' }}>ใช้โลโก้/รูปร้านค้าของบริษัทคุณโดยอัตโนมัติ — แก้ไขโลโก้ได้ที่หน้า "การตั้งค่า"</Typography>
                 </Box>
               </Box>
             </Box>

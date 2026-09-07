@@ -4,6 +4,10 @@ export type Jobpost = {
   id: number
   employer_id: number
   company_name: string
+  // The employer's own logo/shop photo (AttachmentEmployer.Logo), reused as
+  // the job posting's photo — empty string if the employer hasn't uploaded
+  // one, in which case the UI falls back to a plain placeholder.
+  company_logo: string
   position: string
   job_type: string
   job_description: string

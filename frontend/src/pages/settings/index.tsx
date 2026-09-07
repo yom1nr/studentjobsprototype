@@ -18,6 +18,7 @@ import { useAuth } from '../../auth/useAuth'
 import { ApiError, getApiBaseUrl } from '../../services/https'
 import { uploadFile } from '../../services/https/upload'
 import { acknowledgeRequestNote, getMyEmployerProfile, upsertMyEmployerProfile } from '../../services/https/employer'
+import { getMyAdminProfile, upsertMyAdminProfile } from '../../services/https/admin'
 import type { EmployerProfile as EmployerProfileApi } from '../../interface/IEmployerInterface'
 import { extractScheduleFromImage, getMyStudentProfile, upsertMyStudentProfile } from '../../services/https/student'
 import type { StudentProfile as StudentProfileApi } from '../../interface/IStudentInterface'
@@ -1294,17 +1295,173 @@ function StudentSettingsView() {
   )
 }
 
-// Admins have no student/company profile to fill out — just an account
-// (username/email/password/avatar). Reusing StudentSettingsView here (the old
-// fallback for "anything that isn't an employer") tried to fetch a student
-// profile with an admin token, which the backend correctly 403s on, showing
-// "access denied" above a student-shaped form that made no sense for an admin.
+type AdminProfileFields = { firstName: string; lastName: string; position: string; department: string; enterprise: string }
+const EMPTY_ADMIN_PROFILE: AdminProfileFields = { firstName: '', lastName: '', position: '', department: '', enterprise: '' }
+const adminFieldRows: { key: keyof AdminProfileFields; label: string }[] = [
+  { key: 'firstName', label: 'ชื่อ' },
+  { key: 'lastName', label: 'นามสกุล' },
+  { key: 'position', label: 'ตำแหน่ง' },
+  { key: 'department', label: 'แผนก/หน่วยงาน' },
+  { key: 'enterprise', label: 'องค์กร' },
+]
+
+// Admins have no student/company profile to fill out the way students/
+// employers do — just their own name/position and an account. Reusing
+// StudentSettingsView here (the old fallback for "anything that isn't an
+// employer") tried to fetch a student profile with an admin token, which the
+// backend correctly 403s on, showing "access denied" above a student-shaped
+// form that made no sense for an admin.
 function AdminSettingsView() {
-  usePageTitle('การตั้งค่าบัญชีผู้ดูแลระบบ')
+  usePageTitle('ข้อมูลส่วนตัวผู้ดูแลระบบ')
+  const { token } = useAuth()
+
+  const [profile, setProfile] = useState<AdminProfileFields>(EMPTY_ADMIN_PROFILE)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<AdminProfileFields>(EMPTY_ADMIN_PROFILE)
+  const [loadingProfile, setLoadingProfile] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [savedNotice, setSavedNotice] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+
+    async function load() {
+      setLoadingProfile(true)
+      try {
+        const api = await getMyAdminProfile(token!)
+        if (cancelled) return
+        setProfile({
+          firstName: api.first_name,
+          lastName: api.last_name,
+          position: api.position,
+          department: api.department,
+          enterprise: api.enterprise,
+        })
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'โหลดข้อมูลไม่สำเร็จ')
+        }
+      } finally {
+        if (!cancelled) setLoadingProfile(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  function startEdit() {
+    setDraft(profile)
+    setError(null)
+    setEditing(true)
+  }
+
+  async function saveProfile() {
+    if (!token) return
+    if (draft.firstName.trim().length === 0 || draft.lastName.trim().length === 0) {
+      setError('กรุณากรอกชื่อและนามสกุล')
+      return
+    }
+    setError(null)
+    setSaving(true)
+    try {
+      const api = await upsertMyAdminProfile(token, {
+        first_name: draft.firstName.trim(),
+        last_name: draft.lastName.trim(),
+        position: draft.position.trim() || undefined,
+        department: draft.department.trim() || undefined,
+        enterprise: draft.enterprise.trim() || undefined,
+      })
+      setProfile({
+        firstName: api.first_name,
+        lastName: api.last_name,
+        position: api.position,
+        department: api.department,
+        enterprise: api.enterprise,
+      })
+      setEditing(false)
+      setSavedNotice(true)
+    } catch (err) {
+      setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loadingProfile) {
+    return <Alert severity="info">กำลังโหลดข้อมูล…</Alert>
+  }
 
   return (
     <Box sx={{ maxWidth: 950, mx: 'auto' }}>
+      <ErrorAlert message={error} />
+
+      <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4, mb: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>
+            {editing ? 'แก้ไขข้อมูลส่วนตัว' : 'ข้อมูลส่วนตัว'}
+          </Typography>
+          {editing ? (
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                startIcon={<CheckOutlinedIcon />}
+                onClick={() => void saveProfile()}
+                disabled={saving}
+                sx={{ bgcolor: '#DFF3E1', color: '#217829', textTransform: 'none', borderRadius: '20px', px: 2 }}
+              >
+                บันทึก
+              </Button>
+              <Button
+                startIcon={<CloseOutlinedIcon />}
+                onClick={() => setEditing(false)}
+                sx={{ bgcolor: '#FCE4E4', color: '#DA1E28', textTransform: 'none', borderRadius: '20px', px: 2 }}
+              >
+                ยกเลิก
+              </Button>
+            </Box>
+          ) : (
+            <Button
+              startIcon={<EditOutlinedIcon />}
+              onClick={startEdit}
+              sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
+            >
+              แก้ไขข้อมูล
+            </Button>
+          )}
+        </Box>
+
+        {editing ? (
+          <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3, alignItems: 'center' }}>
+            {adminFieldRows.map((row) => (
+              <Box key={row.key} sx={{ display: 'contents' }}>
+                <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                <TextField
+                  size="small"
+                  value={draft[row.key]}
+                  onChange={(e) => setDraft({ ...draft, [row.key]: e.target.value })}
+                  sx={{ bgcolor: colors.field, borderRadius: 1, maxWidth: 320 }}
+                />
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 1.5, columnGap: 3 }}>
+            {adminFieldRows.map((row) => (
+              <Box key={row.key} sx={{ display: 'contents' }}>
+                <Typography sx={{ fontWeight: 700, fontSize: 16, color: colors.navy }}>{row.label}</Typography>
+                <Typography sx={{ fontSize: 16, color: profile[row.key] ? '#000' : '#9AA0A6' }}>
+                  {profile[row.key] || 'ยังไม่ระบุ'}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
+
       <AccountPanel onSaved={() => setSavedNotice(true)} />
 
       <Dialog open={savedNotice} onClose={() => setSavedNotice(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>

@@ -112,3 +112,22 @@ export type AuditLogQuery = Partial<{
   limit: number
   offset: number
 }>
+
+export type AdminProfile = {
+  user_id: number
+  email: string
+  first_name: string
+  last_name: string
+  position: string
+  department: string
+  enterprise: string
+  created_at: string
+}
+
+export type UpsertAdminProfileRequest = {
+  first_name: string
+  last_name: string
+  position?: string
+  department?: string
+  enterprise?: string
+}

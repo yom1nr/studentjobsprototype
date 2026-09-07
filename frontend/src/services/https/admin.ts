@@ -1,5 +1,6 @@
 import type {
   AdminAuditLogEntry,
+  AdminProfile,
   AdminUpdateEmployerRequest,
   AdminUpdateStudentRequest,
   AuditLogQuery,
@@ -8,8 +9,17 @@ import type {
   EmployerDirectoryEntry,
   RejectEmployerRequest,
   StudentDirectoryEntry,
+  UpsertAdminProfileRequest,
 } from '../../interface/IAdminInterface'
 import { apiFetch } from './index'
+
+export function getMyAdminProfile(token: string): Promise<AdminProfile> {
+  return apiFetch<AdminProfile>('/api/v1/admin/profile', { token })
+}
+
+export function upsertMyAdminProfile(token: string, payload: UpsertAdminProfileRequest): Promise<AdminProfile> {
+  return apiFetch<AdminProfile>('/api/v1/admin/profile', { method: 'PUT', token, body: payload })
+}
 
 export function listEmployerApprovals(token: string, status: EmployerApprovalStatus = 'pending'): Promise<EmployerApproval[]> {
   return apiFetch<EmployerApproval[]>(`/api/v1/admin/employers?status=${status}`, { token })

@@ -1294,7 +1294,35 @@ function StudentSettingsView() {
   )
 }
 
+// Admins have no student/company profile to fill out — just an account
+// (username/email/password/avatar). Reusing StudentSettingsView here (the old
+// fallback for "anything that isn't an employer") tried to fetch a student
+// profile with an admin token, which the backend correctly 403s on, showing
+// "access denied" above a student-shaped form that made no sense for an admin.
+function AdminSettingsView() {
+  usePageTitle('การตั้งค่าบัญชีผู้ดูแลระบบ')
+  const [savedNotice, setSavedNotice] = useState(false)
+
+  return (
+    <Box sx={{ maxWidth: 950, mx: 'auto' }}>
+      <AccountPanel onSaved={() => setSavedNotice(true)} />
+
+      <Dialog open={savedNotice} onClose={() => setSavedNotice(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
+        <Box sx={{ p: 4, textAlign: 'center', position: 'relative' }}>
+          <IconButton onClick={() => setSavedNotice(false)} size="small" sx={{ position: 'absolute', top: 12, right: 12 }}>
+            <CloseOutlinedIcon />
+          </IconButton>
+          <CheckCircleOutlineIcon sx={{ fontSize: 88, color: '#2E7D32' }} />
+          <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mt: 1 }}>บันทึกข้อมูลสำเร็จ</Typography>
+        </Box>
+      </Dialog>
+    </Box>
+  )
+}
+
 export default function SettingsPage() {
   const { user } = useAuth()
-  return user?.role === 'employer' ? <EmployerSettingsView /> : <StudentSettingsView />
+  if (user?.role === 'employer') return <EmployerSettingsView />
+  if (user?.role === 'admin') return <AdminSettingsView />
+  return <StudentSettingsView />
 }

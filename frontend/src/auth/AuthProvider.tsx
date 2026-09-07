@@ -19,6 +19,20 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [isLoading, setIsLoading] = useState<boolean>(true)
 
   const logout = useCallback(() => {
+    // Best-effort: revoke this token server-side so it can't be reused if
+    // it leaked (stolen, left in a shared computer's history, etc.) —
+    // but local logout must never wait on or fail because of this call.
+    // Read straight from localStorage rather than the `token` state value
+    // so this callback doesn't need `token` in its deps (keeps its identity
+    // stable for the effects/callbacks that depend on it).
+    const currentToken = localStorage.getItem(TOKEN_STORAGE_KEY)
+    if (currentToken) {
+      void authApi.logout(currentToken).catch(() => {
+        // Ignore — token may already be expired/revoked, or the network
+        // may be down. Either way the user still logs out locally below.
+      })
+    }
+
     localStorage.removeItem(TOKEN_STORAGE_KEY)
     setToken(null)
     setUser(null)

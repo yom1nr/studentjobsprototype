@@ -20,6 +20,7 @@ type JobpostResponse struct {
 	ID                      uint    `json:"id"`
 	EmployerID              uint    `json:"employer_id"`
 	CompanyName             string  `json:"company_name"`
+	CompanyLogo             string  `json:"company_logo"`
 	Position                string  `json:"position"`
 	JobType                 string  `json:"job_type"`
 	JobDescription          string  `json:"job_description"`

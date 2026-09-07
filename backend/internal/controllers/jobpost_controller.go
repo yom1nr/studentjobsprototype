@@ -43,7 +43,7 @@ func (h *JobpostController) ListOpenJobposts(c *gin.Context) {
 			employerIDs = append(employerIDs, j.UserID)
 		}
 	}
-	companies := h.companyNameMap(employerIDs)
+	companies := h.companyInfoMap(employerIDs)
 
 	responses := make([]dto.JobpostResponse, 0, len(jobposts))
 	for _, j := range jobposts {
@@ -86,9 +86,10 @@ func (h *JobpostController) ListMyJobposts(c *gin.Context) {
 		return
 	}
 
+	company := h.companyInfoMap([]uint{employer.UserID})[employer.UserID]
 	responses := make([]dto.JobpostResponse, 0, len(jobposts))
 	for _, j := range jobposts {
-		responses = append(responses, mapJobpostToResponse(&j, employer.CompanyName))
+		responses = append(responses, mapJobpostToResponse(&j, company))
 	}
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
@@ -136,7 +137,7 @@ func (h *JobpostController) CreateJobpost(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusCreated, mapJobpostToResponse(jobpost, employer.CompanyName))
+	utils.JSONSuccess(c, http.StatusCreated, mapJobpostToResponse(jobpost, h.companyInfoMap([]uint{employer.UserID})[employer.UserID]))
 }
 
 // UpdateJobpost edits a job posting owned by the current employer.
@@ -184,7 +185,7 @@ func (h *JobpostController) UpdateJobpost(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, employer.CompanyName))
+	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, h.companyInfoMap([]uint{employer.UserID})[employer.UserID]))
 }
 
 // CloseJobpost closes a job posting owned by the current employer (stops accepting applications).
@@ -205,7 +206,7 @@ func (h *JobpostController) CloseJobpost(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, employer.CompanyName))
+	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, h.companyInfoMap([]uint{employer.UserID})[employer.UserID]))
 }
 
 // DeleteJobpost removes a job posting owned by the current employer along with
@@ -332,30 +333,45 @@ func (h *JobpostController) findByID(id uint) (*models.Jobpost, error) {
 }
 
 func (h *JobpostController) mapWithCompanyName(jobpost *models.Jobpost) dto.JobpostResponse {
-	var employer models.Employer
-	companyName := ""
-	if err := h.db.Select("company_name").First(&employer, jobpost.UserID).Error; err == nil {
-		companyName = employer.CompanyName
-	}
-	return mapJobpostToResponse(jobpost, companyName)
+	company := h.companyInfoMap([]uint{jobpost.UserID})[jobpost.UserID]
+	return mapJobpostToResponse(jobpost, company)
 }
 
-// companyNameMap loads company_name for many employers in one query, avoiding
-// an N+1 SELECT-per-jobpost when mapping a list of postings from mixed employers.
-func (h *JobpostController) companyNameMap(employerIDs []uint) map[uint]string {
-	out := make(map[uint]string, len(employerIDs))
+// companyInfo is the employer-side display info attached to a job posting:
+// the company name (Employer table) and logo (AttachmentEmployer table —
+// same one shown on the employer's own profile, reused here so a job post's
+// "photo" is just whatever logo the employer already uploaded, rather than a
+// separate per-posting upload).
+type companyInfo struct {
+	Name string
+	Logo string
+}
+
+// companyInfoMap loads company name + logo for many employers in two queries
+// total (one per table), avoiding an N+1 SELECT-per-jobpost when mapping a
+// list of postings from mixed employers.
+func (h *JobpostController) companyInfoMap(employerIDs []uint) map[uint]companyInfo {
+	out := make(map[uint]companyInfo, len(employerIDs))
 	if len(employerIDs) == 0 {
 		return out
 	}
-	var rows []models.Employer
-	h.db.Select("user_id", "company_name").Where("user_id IN ?", employerIDs).Find(&rows)
-	for _, e := range rows {
-		out[e.UserID] = e.CompanyName
+	var employers []models.Employer
+	h.db.Select("user_id", "company_name").Where("user_id IN ?", employerIDs).Find(&employers)
+	for _, e := range employers {
+		out[e.UserID] = companyInfo{Name: e.CompanyName}
+	}
+
+	var attachments []models.AttachmentEmployer
+	h.db.Select("user_id", "logo").Where("user_id IN ?", employerIDs).Find(&attachments)
+	for _, a := range attachments {
+		info := out[a.UserID]
+		info.Logo = a.Logo
+		out[a.UserID] = info
 	}
 	return out
 }
 
-func mapJobpostToResponse(jobpost *models.Jobpost, companyName string) dto.JobpostResponse {
+func mapJobpostToResponse(jobpost *models.Jobpost, company companyInfo) dto.JobpostResponse {
 	var dateStart *string
 	if jobpost.DateStart != nil {
 		formatted := jobpost.DateStart.Format(time.RFC3339)
@@ -365,7 +381,8 @@ func mapJobpostToResponse(jobpost *models.Jobpost, companyName string) dto.Jobpo
 	return dto.JobpostResponse{
 		ID:                      jobpost.JobpostID,
 		EmployerID:              jobpost.UserID,
-		CompanyName:             companyName,
+		CompanyName:             company.Name,
+		CompanyLogo:             company.Logo,
 		Position:                jobpost.Position,
 		JobType:                 jobpost.JobType,
 		JobDescription:          jobpost.JobDescription,

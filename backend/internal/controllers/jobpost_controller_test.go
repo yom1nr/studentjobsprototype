@@ -16,6 +16,11 @@ import (
 
 func mustCreateEmployer(t *testing.T, db *gorm.DB, email, companyName string) uint {
 	t.Helper()
+	return mustCreateEmployerWithLogo(t, db, email, companyName, "")
+}
+
+func mustCreateEmployerWithLogo(t *testing.T, db *gorm.DB, email, companyName, logoURL string) uint {
+	t.Helper()
 	user := models.User{UserName: email, Email: email, Password: "x", Role: "employer"}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user %s: %v", email, err)
@@ -29,6 +34,12 @@ func mustCreateEmployer(t *testing.T, db *gorm.DB, email, companyName string) ui
 	}
 	if err := db.Create(&employer).Error; err != nil {
 		t.Fatalf("create employer %s: %v", email, err)
+	}
+	if logoURL != "" {
+		attachment := models.AttachmentEmployer{UserID: user.UserID, Logo: logoURL}
+		if err := db.Create(&attachment).Error; err != nil {
+			t.Fatalf("create attachment for %s: %v", email, err)
+		}
 	}
 	return user.UserID
 }
@@ -55,8 +66,8 @@ func TestJobpostController_ListOpenJobposts_ResolvesCompanyNamesAcrossEmployers(
 	gin.SetMode(gin.TestMode)
 	db := testsupport.SetupTestDB(t)
 
-	empA := mustCreateEmployer(t, db, "employer.a@example.com", "Alpha Co")
-	empB := mustCreateEmployer(t, db, "employer.b@example.com", "Beta Co")
+	empA := mustCreateEmployerWithLogo(t, db, "employer.a@example.com", "Alpha Co", "/uploads/alpha-logo.png")
+	empB := mustCreateEmployer(t, db, "employer.b@example.com", "Beta Co") // no logo uploaded — should come back empty, not Alpha's
 
 	mustCreateOpenJobpost(t, db, empA, "JOB-A1", "Barista")
 	mustCreateOpenJobpost(t, db, empA, "JOB-A2", "Cashier")
@@ -81,30 +92,35 @@ func TestJobpostController_ListOpenJobposts_ResolvesCompanyNamesAcrossEmployers(
 	var jobposts []struct {
 		EmployerID  uint   `json:"employer_id"`
 		CompanyName string `json:"company_name"`
+		CompanyLogo string `json:"company_logo"`
 		Position    string `json:"position"`
 	}
 	if err := json.Unmarshal(env.Data, &jobposts); err != nil {
 		t.Fatalf("decode jobposts: %v", err)
 	}
 
-	got := map[string]string{} // position -> company name
+	type nameLogo struct{ name, logo string }
+	got := map[string]nameLogo{} // position -> {company name, logo}
 	for _, jp := range jobposts {
-		got[jp.Position] = jp.CompanyName
+		got[jp.Position] = nameLogo{jp.CompanyName, jp.CompanyLogo}
 	}
 
-	want := map[string]string{
-		"Barista": "Alpha Co",
-		"Cashier": "Alpha Co",
-		"Tutor":   "Beta Co",
+	want := map[string]nameLogo{
+		"Barista": {"Alpha Co", "/uploads/alpha-logo.png"},
+		"Cashier": {"Alpha Co", "/uploads/alpha-logo.png"},
+		"Tutor":   {"Beta Co", ""}, // Beta never uploaded a logo
 	}
-	for position, wantCompany := range want {
-		gotCompany, ok := got[position]
+	for position, wantVal := range want {
+		gotVal, ok := got[position]
 		if !ok {
 			t.Errorf("position %q missing from response", position)
 			continue
 		}
-		if gotCompany != wantCompany {
-			t.Errorf("position %q: company_name = %q, want %q", position, gotCompany, wantCompany)
+		if gotVal.name != wantVal.name {
+			t.Errorf("position %q: company_name = %q, want %q", position, gotVal.name, wantVal.name)
+		}
+		if gotVal.logo != wantVal.logo {
+			t.Errorf("position %q: company_logo = %q, want %q", position, gotVal.logo, wantVal.logo)
 		}
 	}
 }

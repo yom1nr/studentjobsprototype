@@ -228,7 +228,7 @@ func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
     }
 
     var admin models.Admin
-    if err := h.db.Where("user_id = ?", adminUserID).First(&admin).Error; err != nil {
+    if err := h.db.Preload("User").Where("user_id = ?", adminUserID).First(&admin).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             utils.JSONError(c, http.StatusBadRequest, "action failed", "admin profile not found for current user")
         } else {
@@ -238,6 +238,78 @@ func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
     }
 
     return &admin, true
+}
+
+// GetMyProfile returns the current admin's own profile (name, position,
+// department, enterprise — shown on their settings page).
+func (h *AdminController) GetMyProfile(c *gin.Context) {
+    admin, ok := h.currentAdmin(c)
+    if !ok {
+        return
+    }
+    utils.JSONSuccess(c, http.StatusOK, mapAdminToResponse(admin))
+}
+
+// UpsertMyProfile updates the current admin's own profile fields. Admin
+// accounts are provisioned by the seeder only (see Register()'s role
+// restriction — never self-registered), so every admin User already has a
+// matching Admin row in practice; the create-if-missing branch here is only
+// a defensive fallback, not the expected path.
+func (h *AdminController) UpsertMyProfile(c *gin.Context) {
+    userID, ok := utils.GetUserIDFromContext(c)
+    if !ok {
+        utils.JSONError(c, http.StatusUnauthorized, "authorization required", "user id missing from token")
+        return
+    }
+
+    var payload dto.AdminProfileRequest
+    if err := c.ShouldBindJSON(&payload); err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
+        return
+    }
+    if err := h.validate.Struct(payload); err != nil {
+        utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
+        return
+    }
+
+    var admin models.Admin
+    if err := h.db.Preload("User").Where("user_id = ?", userID).First(&admin).Error; err != nil {
+        if !errors.Is(err, gorm.ErrRecordNotFound) {
+            utils.JSONInternalError(c, "update failed", err)
+            return
+        }
+        admin = models.Admin{UserID: userID}
+    }
+
+    admin.FirstName = payload.FirstName
+    admin.LastName = payload.LastName
+    admin.Position = payload.Position
+    admin.Department = payload.Department
+    admin.Enterprise = payload.Enterprise
+
+    if err := h.db.Save(&admin).Error; err != nil {
+        utils.JSONInternalError(c, "update failed", err)
+        return
+    }
+
+    utils.JSONSuccess(c, http.StatusOK, mapAdminToResponse(&admin))
+}
+
+func mapAdminToResponse(admin *models.Admin) dto.AdminProfileResponse {
+    email := ""
+    if admin.User != nil {
+        email = admin.User.Email
+    }
+    return dto.AdminProfileResponse{
+        UserID:     admin.UserID,
+        Email:      email,
+        FirstName:  admin.FirstName,
+        LastName:   admin.LastName,
+        Position:   admin.Position,
+        Department: admin.Department,
+        Enterprise: admin.Enterprise,
+        CreatedAt:  admin.CreatedAt.Format(time.RFC3339),
+    }
 }
 
 func (h *AdminController) findEmployerByID(id uint) (*models.Employer, error) {

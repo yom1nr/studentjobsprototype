@@ -172,6 +172,8 @@ func SetupRouter(
 	// Admin: employer verification workflow
 	admin := api.Group("/admin")
 	admin.Use(jwtAuth, middleware.RequireRole("admin"))
+	admin.GET("/profile", adminHandler.GetMyProfile)
+	admin.PUT("/profile", adminHandler.UpsertMyProfile)
 	admin.GET("/employers", adminHandler.ListEmployerApprovals)
 	admin.GET("/employers/:id", adminHandler.GetEmployerDetail)
 	admin.POST("/employers/:id/approve", adminHandler.ApproveEmployer)

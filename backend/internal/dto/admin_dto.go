@@ -35,3 +35,26 @@ type RequestDocumentsRequest struct {
 type RejectEmployerRequest struct {
     Reason string `json:"reason" validate:"required,min=1,max=500"`
 }
+
+// AdminProfileRequest submits/updates the current admin's own profile.
+// Admin accounts are provisioned by the seeder only (never self-registered),
+// so this is effectively always an edit to an already-existing profile.
+type AdminProfileRequest struct {
+    FirstName  string `json:"first_name" validate:"required,min=1,max=100"`
+    LastName   string `json:"last_name" validate:"required,min=1,max=100"`
+    Position   string `json:"position" validate:"omitempty,max=100"`
+    Department string `json:"department" validate:"omitempty,max=150"`
+    Enterprise string `json:"enterprise" validate:"omitempty,max=150"`
+}
+
+// AdminProfileResponse is the current admin's own profile (settings page).
+type AdminProfileResponse struct {
+    UserID     uint   `json:"user_id"`
+    Email      string `json:"email"`
+    FirstName  string `json:"first_name"`
+    LastName   string `json:"last_name"`
+    Position   string `json:"position"`
+    Department string `json:"department"`
+    Enterprise string `json:"enterprise"`
+    CreatedAt  string `json:"created_at"`
+}

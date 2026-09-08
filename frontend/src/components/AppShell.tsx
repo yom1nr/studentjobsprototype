@@ -22,7 +22,6 @@ import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined'
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined'
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined'
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined'
-import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
@@ -128,7 +127,6 @@ const adminStudentDirectoryNavItem: NavItem = {
 
 function buildBottomNavItems(unreadNotifications: number): NavItem[] {
   return [
-    { label: 'ข้อความ',      icon: <ChatBubbleOutlineOutlinedIcon />,         path: '/messages',      badge: 2 },
     {
       label: 'การแจ้งเตือน',
       icon: <NotificationsNoneOutlinedIcon />,

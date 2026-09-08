@@ -22,7 +22,6 @@ import InterviewsPage from '../pages/interviews'
 import EmploymentPage from '../pages/employment'
 import PayrollPage from '../pages/payroll'
 import ComplaintsPage from '../pages/complaints'
-import MessagesPage from '../pages/messages'
 import NotificationsPage from '../pages/notifications'
 import SettingsPage from '../pages/settings'
 import AdminEmployerApprovalsPage from '../pages/admin'
@@ -79,7 +78,6 @@ export function MainRoutes() {
             {/* Any authenticated role */}
             <Route path="/profile" element={<DashboardPage />} />
             <Route path="/complaints" element={<ComplaintsPage />} />
-            <Route path="/messages" element={<MessagesPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
 

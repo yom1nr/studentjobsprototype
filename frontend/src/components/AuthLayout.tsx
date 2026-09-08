@@ -1,6 +1,7 @@
 import { Box, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
 import studentLogo from '../assets/student-logo.svg'
+import { Link } from 'react-router-dom'
 
 const colors = { bg: '#DAEAF7', navy: '#000349' }
 
@@ -15,7 +16,9 @@ export function AuthLayout({ children, cardMaxWidth = 480 }: Readonly<{ children
       }}
     >
       <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
-        <Box component="img" src={studentLogo} alt="" sx={{ width: 220, height: 'auto' }} />
+        <Link to="/">
+          <Box component="img" src={studentLogo} alt="" sx={{ width: 220, height: 'auto', cursor: 'pointer' }} />
+        </Link>
         <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: 32, color: colors.navy }}>
           STUDENT <Box component="span" sx={{ color: '#045BE4' }}>JOBS</Box>
         </Typography>

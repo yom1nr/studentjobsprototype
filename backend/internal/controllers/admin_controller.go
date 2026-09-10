@@ -220,6 +220,21 @@ func (h *AdminController) RequestDocuments(c *gin.Context) {
     utils.JSONSuccess(c, http.StatusOK, mapEmployerApprovalStatus(employer))
 }
 
+// findAdminByUserID looks up an Admin by user id, preloading its User row.
+// Returns (nil, nil) — not an error — when there's no such Admin yet, so
+// callers can decide for themselves whether that's a failure (currentAdmin)
+// or something to create (UpsertMyProfile).
+func (h *AdminController) findAdminByUserID(userID uint) (*models.Admin, error) {
+    var admin models.Admin
+    if err := h.db.Preload("User").Where("user_id = ?", userID).First(&admin).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, nil
+        }
+        return nil, err
+    }
+    return &admin, nil
+}
+
 func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
     adminUserID, ok := utils.GetUserIDFromContext(c)
     if !ok {
@@ -227,17 +242,17 @@ func (h *AdminController) currentAdmin(c *gin.Context) (*models.Admin, bool) {
         return nil, false
     }
 
-    var admin models.Admin
-    if err := h.db.Preload("User").Where("user_id = ?", adminUserID).First(&admin).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            utils.JSONError(c, http.StatusBadRequest, "action failed", "admin profile not found for current user")
-        } else {
-            utils.JSONInternalError(c, "action failed", err)
-        }
+    admin, err := h.findAdminByUserID(adminUserID)
+    if err != nil {
+        utils.JSONInternalError(c, "action failed", err)
+        return nil, false
+    }
+    if admin == nil {
+        utils.JSONError(c, http.StatusBadRequest, "action failed", "admin profile not found for current user")
         return nil, false
     }
 
-    return &admin, true
+    return admin, true
 }
 
 // GetMyProfile returns the current admin's own profile (name, position,
@@ -272,13 +287,13 @@ func (h *AdminController) UpsertMyProfile(c *gin.Context) {
         return
     }
 
-    var admin models.Admin
-    if err := h.db.Preload("User").Where("user_id = ?", userID).First(&admin).Error; err != nil {
-        if !errors.Is(err, gorm.ErrRecordNotFound) {
-            utils.JSONInternalError(c, "update failed", err)
-            return
-        }
-        admin = models.Admin{UserID: userID}
+    admin, err := h.findAdminByUserID(userID)
+    if err != nil {
+        utils.JSONInternalError(c, "update failed", err)
+        return
+    }
+    if admin == nil {
+        admin = &models.Admin{UserID: userID}
     }
 
     admin.FirstName = payload.FirstName
@@ -287,12 +302,12 @@ func (h *AdminController) UpsertMyProfile(c *gin.Context) {
     admin.Department = payload.Department
     admin.Enterprise = payload.Enterprise
 
-    if err := h.db.Save(&admin).Error; err != nil {
+    if err := h.db.Save(admin).Error; err != nil {
         utils.JSONInternalError(c, "update failed", err)
         return
     }
 
-    utils.JSONSuccess(c, http.StatusOK, mapAdminToResponse(&admin))
+    utils.JSONSuccess(c, http.StatusOK, mapAdminToResponse(admin))
 }
 
 func mapAdminToResponse(admin *models.Admin) dto.AdminProfileResponse {

@@ -30,8 +30,12 @@ func envOr(key, fallback string) string {
 // Connection details default to the project's standard local Docker
 // Postgres (see CLAUDE.md) and can be overridden with TEST_DB_HOST /
 // TEST_DB_PORT / TEST_DB_USER / TEST_DB_PASSWORD / TEST_DB_NAME. If Postgres
-// isn't reachable, the test is skipped rather than failed, so `go test ./...`
-// still passes in environments without Docker running.
+// isn't reachable, the test is skipped rather than failed — so a developer's
+// `go test ./...` still passes without Docker running — UNLESS the CI env
+// var is set (the de facto standard GitHub Actions/GitLab CI/CircleCI/Travis
+// all export automatically), in which case it's a hard failure instead: a
+// pipeline that's supposed to run these integration tests must not go green
+// by silently running zero assertions.
 func SetupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -45,6 +49,9 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 		" dbname=postgres port=" + port + " sslmode=disable TimeZone=UTC"
 	admin, err := gorm.Open(postgres.Open(adminDSN), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("test postgres not reachable at %s:%s (%v) — CI must provide a real Postgres for these integration tests, not skip them", host, port, err)
+		}
 		t.Skipf("skipping: test postgres not reachable at %s:%s (%v)", host, port, err)
 	}
 	sqlDB, err := admin.DB()

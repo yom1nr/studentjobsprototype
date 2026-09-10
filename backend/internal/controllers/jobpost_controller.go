@@ -86,7 +86,7 @@ func (h *JobpostController) ListMyJobposts(c *gin.Context) {
 		return
 	}
 
-	company := h.companyInfoMap([]uint{employer.UserID})[employer.UserID]
+	company := h.ownCompanyInfo(employer)
 	responses := make([]dto.JobpostResponse, 0, len(jobposts))
 	for _, j := range jobposts {
 		responses = append(responses, mapJobpostToResponse(&j, company))
@@ -137,7 +137,7 @@ func (h *JobpostController) CreateJobpost(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusCreated, mapJobpostToResponse(jobpost, h.companyInfoMap([]uint{employer.UserID})[employer.UserID]))
+	utils.JSONSuccess(c, http.StatusCreated, mapJobpostToResponse(jobpost, h.ownCompanyInfo(employer)))
 }
 
 // UpdateJobpost edits a job posting owned by the current employer.
@@ -185,7 +185,7 @@ func (h *JobpostController) UpdateJobpost(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, h.companyInfoMap([]uint{employer.UserID})[employer.UserID]))
+	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, h.ownCompanyInfo(employer)))
 }
 
 // CloseJobpost closes a job posting owned by the current employer (stops accepting applications).
@@ -206,7 +206,7 @@ func (h *JobpostController) CloseJobpost(c *gin.Context) {
 		return
 	}
 
-	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, h.companyInfoMap([]uint{employer.UserID})[employer.UserID]))
+	utils.JSONSuccess(c, http.StatusOK, mapJobpostToResponse(jobpost, h.ownCompanyInfo(employer)))
 }
 
 // DeleteJobpost removes a job posting owned by the current employer along with
@@ -345,6 +345,18 @@ func (h *JobpostController) mapWithCompanyName(jobpost *models.Jobpost) dto.Jobp
 type companyInfo struct {
 	Name string
 	Logo string
+}
+
+// ownCompanyInfo builds companyInfo for the current employer's own job posts
+// (Create/Update/Close/ListMyJobposts), which always call currentEmployer
+// first and so already have CompanyName in hand — only the logo (stored
+// separately in AttachmentEmployer) still needs a lookup. Using this instead
+// of companyInfoMap skips the redundant re-fetch of the Employer row that
+// mapping code already has.
+func (h *JobpostController) ownCompanyInfo(employer *models.Employer) companyInfo {
+	var attachment models.AttachmentEmployer
+	h.db.Select("logo").Where("user_id = ?", employer.UserID).First(&attachment)
+	return companyInfo{Name: employer.CompanyName, Logo: attachment.Logo}
 }
 
 // companyInfoMap loads company name + logo for many employers in two queries

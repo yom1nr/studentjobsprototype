@@ -5,7 +5,6 @@ import CheckOutlinedIcon from '@mui/icons-material/CheckOutlined'
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
 import UploadOutlinedIcon from '@mui/icons-material/UploadOutlined'
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
-import AddIcon from '@mui/icons-material/Add'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import PersonIcon from '@mui/icons-material/Person'
@@ -74,16 +73,13 @@ const fieldRows: { key: keyof Profile; label: string }[] = [
   { key: 'skills', label: 'ทักษะความสามารถ' },
 ]
 
-type Document = { id: number; name: string; uploadedAt: string }
+type StudentDocumentKey = 'schedule' | 'transcript' | 'resume'
+type StudentDocument = { key: StudentDocumentKey; label: string; hint: string; url: string }
 
-const ALLOWED_UPLOAD_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp']
-const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
-
-const INITIAL_DOCUMENTS: Document[] = [
-  { id: 1, name: 'Profile.jpg', uploadedAt: '20 พ.ค. 2569' },
-  { id: 2, name: 'TimeTable.jpg', uploadedAt: '20 พ.ค. 2569' },
-  { id: 3, name: 'Transcript.pdf', uploadedAt: '20 พ.ค. 2569' },
-  { id: 4, name: 'Resume.pdf', uploadedAt: '20 พ.ค. 2569' },
+const INITIAL_STUDENT_DOCUMENTS: StudentDocument[] = [
+  { key: 'schedule', label: 'ตารางเรียน (Timetable)', hint: 'รองรับไฟล์ PDF, JPG, PNG, WebP (ขนาดไม่เกิน 5MB)', url: '' },
+  { key: 'transcript', label: 'ใบแสดงผลการเรียน (Transcript)', hint: 'รองรับไฟล์ PDF, JPG, PNG, WebP (ขนาดไม่เกิน 5MB)', url: '' },
+  { key: 'resume', label: 'เรซูเม่ / ประวัติส่วนตัว (Resume)', hint: 'รองรับไฟล์ PDF, JPG, PNG, WebP (ขนาดไม่เกิน 5MB)', url: '' },
 ]
 
 // Employer profile fields — mocked locally, mirroring the backend Employer model
@@ -155,11 +151,11 @@ const INITIAL_COMPANY_DOCUMENTS: CompanyDocument[] = [
   { key: 'logo', label: 'โลโก้บริษัท / ร้านค้า (ถ้ามี)', hint: 'รองรับไฟล์ PDF, JPG, PNG (ขนาดไม่เกิน 5MB)', url: '' },
 ]
 
-function UploadRow({
+function UploadRow<K extends string>({
   document,
   token,
   onUpload,
-}: Readonly<{ document: CompanyDocument; token: string; onUpload: (key: CompanyDocument['key'], url: string) => void }>) {
+}: Readonly<{ document: { key: K; label: string; hint: string; url: string }; token: string; onUpload: (key: K, url: string) => void }>) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -920,10 +916,7 @@ function StudentSettingsView() {
   const [error, setError] = useState<string | null>(null)
   const [savedNotice, setSavedNotice] = useState(false)
 
-  const [documents, setDocuments] = useState(INITIAL_DOCUMENTS)
-  const [uploadOpen, setUploadOpen] = useState(false)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [documents, setDocuments] = useState(INITIAL_STUDENT_DOCUMENTS)
 
   useEffect(() => {
     if (!token) return
@@ -935,6 +928,15 @@ function StudentSettingsView() {
         const api = await getMyStudentProfile(token!)
         if (cancelled) return
         setProfile(apiToLocalStudentProfile(api, { userName: user?.user_name ?? '', phone: user?.phone ?? '', gender: user?.gender ?? '' }))
+        setDocuments((docs) =>
+          docs.map((d) =>
+            d.key === 'schedule'
+              ? { ...d, url: api.schedule ?? '' }
+              : d.key === 'transcript'
+                ? { ...d, url: api.transcript ?? '' }
+                : { ...d, url: api.resume ?? '' },
+          ),
+        )
       } catch (err) {
         // 404 just means the student hasn't submitted a profile yet — keep the empty defaults.
         if (!cancelled && !(err instanceof ApiError && err.status === 404)) {
@@ -1018,46 +1020,43 @@ function StudentSettingsView() {
     }
   }
 
-  function removeDocument(id: number) {
-    setDocuments((docs) => docs.filter((d) => d.id !== id))
+  function uploadDocument(key: StudentDocumentKey, url: string) {
+    setDocuments((docs) => docs.map((d) => (d.key === key ? { ...d, url } : d)))
   }
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-    if (!ALLOWED_UPLOAD_EXTENSIONS.includes(extension)) {
-      setUploadError('ไฟล์ไม่รองรับ กรุณาเลือกไฟล์ PDF, Word, Excel, PowerPoint, Text, JPG, PNG, GIF หรือ WEBP')
-      setSelectedFile(null)
-      return
+  // Saves the uploaded document URLs against the already-saved student
+  // profile, the same way the employer settings page's "documents" tab does.
+  const [savingDocs, setSavingDocs] = useState(false)
+  async function saveDocuments() {
+    if (!token) return
+    setError(null)
+    setSavingDocs(true)
+    try {
+      const api = await upsertMyStudentProfile(token, {
+        first_name: profile.firstName,
+        last_name: profile.lastName,
+        date_of_birth: profile.dateOfBirth || undefined,
+        gender: profile.gender || undefined,
+        phone: profile.phone || undefined,
+        address: profile.address || undefined,
+        university: profile.university || undefined,
+        faculty: profile.faculty || undefined,
+        major: profile.major || undefined,
+        years: profile.year || undefined,
+        skill: profile.skills || undefined,
+        available_time: profile.availableTime || undefined,
+        schedule: documents.find((d) => d.key === 'schedule')?.url || undefined,
+        transcript: documents.find((d) => d.key === 'transcript')?.url || undefined,
+        resume: documents.find((d) => d.key === 'resume')?.url || undefined,
+      })
+      await refreshProfile()
+      setProfile(apiToLocalStudentProfile(api, { userName: user?.user_name ?? '', phone: profile.phone, gender: profile.gender }))
+      setSavedNotice(true)
+    } catch (err) {
+      setError(err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : 'บันทึกเอกสารไม่สำเร็จ')
+    } finally {
+      setSavingDocs(false)
     }
-    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-      setUploadError('ขนาดไฟล์เกิน 10 MB กรุณาเลือกไฟล์ใหม่')
-      setSelectedFile(null)
-      return
-    }
-
-    setUploadError(null)
-    setSelectedFile(file)
-  }
-
-  function closeUploadDialog() {
-    setUploadOpen(false)
-    setSelectedFile(null)
-    setUploadError(null)
-  }
-
-  function confirmUpload() {
-    if (!selectedFile) {
-      setUploadError('กรุณาเลือกไฟล์ที่ต้องการอัปโหลด')
-      return
-    }
-    setDocuments((docs) => [
-      ...docs,
-      { id: docs.length ? Math.max(...docs.map((d) => d.id)) + 1 : 1, name: selectedFile.name, uploadedAt: new Date().toLocaleDateString('th-TH') },
-    ])
-    closeUploadDialog()
   }
 
   if (!user || loadingProfile) {
@@ -1188,98 +1187,24 @@ function StudentSettingsView() {
       <AccountPanel onSaved={() => setSavedNotice(true)} />
 
       <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: '20px', p: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy }}>เอกสารที่อัปโหลด</Typography>
-          <Button
-            startIcon={<UploadOutlinedIcon />}
-            onClick={() => setUploadOpen(true)}
-            sx={{ bgcolor: '#F0F0F0', color: '#000', textTransform: 'none', borderRadius: '20px', px: 2 }}
-          >
-            อัปโหลด
-          </Button>
-        </Box>
+        <Typography sx={{ fontWeight: 700, fontSize: 24, color: colors.navy, mb: 2 }}>เอกสารที่อัปโหลด</Typography>
 
-        <Box>
-          {documents.map((doc, index) => (
-            <Box key={doc.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2, borderTop: index > 0 ? '1px solid #E8E8E8' : 'none' }}>
-              <InsertDriveFileOutlinedIcon sx={{ color: colors.navy }} />
-              <Box sx={{ flex: 1 }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{doc.name}</Typography>
-                <Typography sx={{ fontSize: 14, color: '#000' }}>อัปโหลดเมื่อ {doc.uploadedAt}</Typography>
-              </Box>
-              <Button
-                onClick={() => removeDocument(doc.id)}
-                sx={{ bgcolor: '#FF564A', color: '#fff', textTransform: 'none', borderRadius: '20px', minWidth: 60, px: 1.5, fontSize: 13 }}
-              >
-                ลบ
-              </Button>
-            </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {documents.map((doc) => (
+            <UploadRow key={doc.key} document={doc} token={token ?? ''} onUpload={uploadDocument} />
           ))}
-
-          {documents.length === 0 && (
-            <Typography sx={{ color: '#697077', textAlign: 'center', py: 3 }}>ยังไม่มีเอกสารที่อัปโหลด</Typography>
-          )}
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+            <Button
+              variant="contained"
+              onClick={() => void saveDocuments()}
+              disabled={savingDocs}
+              sx={{ bgcolor: colors.navy, textTransform: 'none', borderRadius: '20px', px: 3, '&:hover': { bgcolor: '#000226' } }}
+            >
+              {savingDocs ? 'กำลังบันทึก…' : 'บันทึกเอกสาร'}
+            </Button>
+          </Box>
         </Box>
       </Box>
-
-      {/* Upload dialog */}
-      <Dialog open={uploadOpen} onClose={closeUploadDialog} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
-        <Box sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: 22, color: colors.navy }}>อัปโหลดเอกสาร</Typography>
-            <IconButton size="small" onClick={closeUploadDialog}><CloseOutlinedIcon /></IconButton>
-          </Box>
-
-          <ErrorAlert message={uploadError} />
-
-          <Box
-            component="label"
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: '#E8E8E8',
-              borderRadius: 3,
-              height: 180,
-              cursor: 'pointer',
-              mb: 2,
-              p: 2,
-              textAlign: 'center',
-            }}
-          >
-            <input type="file" hidden onChange={handleFileSelect} accept={ALLOWED_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(',')} />
-            <Box sx={{ width: 56, height: 56, borderRadius: 2, border: `2px solid ${colors.navy}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <AddIcon sx={{ color: colors.navy }} />
-            </Box>
-            {selectedFile && (
-              <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy, mt: 1.5, wordBreak: 'break-all' }}>
-                {selectedFile.name}
-              </Typography>
-            )}
-          </Box>
-
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy, mb: 0.5 }}>รองรับไฟล์:</Typography>
-          <Typography sx={{ fontSize: 12, color: '#333' }}>
-            • เอกสาร: PDF (.pdf), Word (.doc, .docx), Excel (.xls, .xlsx), PowerPoint (.ppt, .pptx), Text (.txt)
-          </Typography>
-          <Typography sx={{ fontSize: 12, color: '#333', mb: 2 }}>
-            • รูปภาพ: JPG (.jpg, .jpeg), PNG (.png), GIF (.gif), WEBP (.webp)
-            <br />
-            ขนาดไฟล์ไม่เกิน 10 MB
-          </Typography>
-
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={confirmUpload}
-            disabled={!selectedFile}
-            sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
-          >
-            อัปโหลด
-          </Button>
-        </Box>
-      </Dialog>
 
       {/* Save success dialog */}
       <Dialog open={savedNotice} onClose={() => setSavedNotice(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>

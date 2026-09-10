@@ -2,6 +2,7 @@ package utils
 
 import (
     "crypto/rand"
+    "crypto/sha256"
     "encoding/hex"
     "errors"
     "time"
@@ -64,6 +65,19 @@ func newJTI() (string, error) {
         return "", err
     }
     return hex.EncodeToString(buf), nil
+}
+
+// TokenRevocationKey returns the identifier a token is revoked/checked under.
+// Normally that's the token's own JTI (claims.ID). If it's ever empty — a
+// token issued before JTIs existed, or a future bug that reintroduces that —
+// a SHA-256 hash of the raw token string is used instead, so logout always
+// has *something* unique to blocklist and can never silently no-op.
+func TokenRevocationKey(claims *JWTClaims, rawToken string) string {
+    if claims.ID != "" {
+        return claims.ID
+    }
+    sum := sha256.Sum256([]byte(rawToken))
+    return "legacy:" + hex.EncodeToString(sum[:])
 }
 
 // ParseToken validates a token string against this provider's secret and

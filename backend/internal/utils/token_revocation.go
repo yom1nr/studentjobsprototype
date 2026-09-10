@@ -22,17 +22,14 @@ func NewTokenRevoker(db *gorm.DB) TokenRevoker {
 }
 
 // Revoke marks a token as unusable for the remainder of its natural
-// lifetime. expiresAt should be the token's own exp claim, so the row can
-// later be pruned once it would have expired anyway.
-func (r TokenRevoker) Revoke(jti string, userID uint, expiresAt time.Time) error {
-    if jti == "" {
-        // Tokens issued before JTIs existed can't be individually revoked.
-        // Nothing to record; the caller still treats logout as successful
-        // client-side (the token simply isn't tracked here).
-        return nil
-    }
+// lifetime. key is whatever utils.TokenRevocationKey computed for it (the
+// token's own JTI, or a hash fallback) — always non-empty, so every token
+// can actually be revoked, not just ones with a JTI. expiresAt should be the
+// token's own exp claim, so the row can later be pruned once it would have
+// expired anyway.
+func (r TokenRevoker) Revoke(key string, userID uint, expiresAt time.Time) error {
     row := models.RevokedToken{
-        JTI:       jti,
+        JTI:       key,
         UserID:    userID,
         ExpiresAt: expiresAt.UTC(),
         RevokedAt: time.Now().UTC(),
@@ -41,14 +38,10 @@ func (r TokenRevoker) Revoke(jti string, userID uint, expiresAt time.Time) error
     return r.db.Save(&row).Error
 }
 
-// IsRevoked reports whether jti has been revoked. An empty jti (tokens
-// issued before this feature existed) is never considered revoked.
-func (r TokenRevoker) IsRevoked(jti string) bool {
-    if jti == "" {
-        return false
-    }
+// IsRevoked reports whether key (see utils.TokenRevocationKey) has been revoked.
+func (r TokenRevoker) IsRevoked(key string) bool {
     var count int64
-    r.db.Model(&models.RevokedToken{}).Where("jti = ?", jti).Count(&count)
+    r.db.Model(&models.RevokedToken{}).Where("jti = ?", key).Count(&count)
     return count > 0
 }
 

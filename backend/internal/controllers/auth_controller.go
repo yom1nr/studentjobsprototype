@@ -175,10 +175,9 @@ func (h *AuthController) Logout(c *gin.Context) {
 
     jti, expiresAt, ok := utils.GetTokenClaimsFromContext(c)
     if !ok {
-        // Token predates JTIs (issued before this feature shipped) — nothing
-        // to record, but logout still succeeds; it'll simply run out on its
-        // own natural expiry instead of being revoked early.
-        utils.JSONSuccess(c, http.StatusOK, gin.H{"message": "logged out"})
+        // Defensive only: JWTAuthMiddleware always sets these before a
+        // handler runs, so this should be unreachable in practice.
+        utils.JSONInternalError(c, "logout failed", errors.New("token claims missing from context"))
         return
     }
 

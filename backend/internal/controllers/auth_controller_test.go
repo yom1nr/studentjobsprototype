@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/SA/Golang-Backend-Example/internal/controllers"
 	"github.com/SA/Golang-Backend-Example/internal/middleware"
@@ -152,6 +153,44 @@ func TestAuth_RegisterLoginLogout_RevokesOnlyThatToken(t *testing.T) {
 	// Logging out with an already-revoked token is a no-op, not an error.
 	if rec, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/logout", nil, tokenA); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("logout with an already-revoked token: HTTP %d, want 401 (invalid token), body=%s", rec.Code, string(env.Error))
+	}
+}
+
+// TestAuth_Logout_RevokesTokenWithoutJTI proves the fix for the Staff-Eng
+// finding that logout lied to the user: a token with no JTI (issued before
+// that feature shipped, or by some future regression) used to hit a silent
+// no-op in TokenRevoker.Revoke and still get a 200 "logged out" back, while
+// staying valid until it expired naturally. It must now actually be revoked,
+// via the SHA-256 hash fallback in utils.TokenRevocationKey.
+func TestAuth_Logout_RevokesTokenWithoutJTI(t *testing.T) {
+	r, _, _ := newAuthRouter(t)
+
+	// newAuthRouter signs with "test-secret" — build a token by hand (with no
+	// ID claim) the same way, since JWTProvider.GenerateToken can no longer
+	// produce one without a JTI.
+	claims := utils.JWTClaims{
+		UserID: 999,
+		Role:   "student",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(time.Hour)),
+		},
+	}
+	legacyToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign legacy token: %v", err)
+	}
+
+	if rec, env := doJSON(t, r, http.MethodGet, "/api/v1/whoami", nil, legacyToken); rec.Code != http.StatusOK {
+		t.Fatalf("whoami with legacy (no-JTI) token before logout: HTTP %d, body=%s", rec.Code, string(env.Error))
+	}
+
+	if rec, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/logout", nil, legacyToken); rec.Code != http.StatusOK {
+		t.Fatalf("logout with legacy token: HTTP %d, body=%s", rec.Code, string(env.Error))
+	}
+
+	if rec, env := doJSON(t, r, http.MethodGet, "/api/v1/whoami", nil, legacyToken); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("whoami with legacy token after logout: HTTP %d, want 401 (should be genuinely revoked), body=%s", rec.Code, string(env.Error))
 	}
 }
 

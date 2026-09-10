@@ -35,7 +35,8 @@ func JWTAuthMiddleware(provider utils.JWTProvider, revoker utils.TokenRevoker) g
             return
         }
 
-        if revoker.IsRevoked(claims.ID) {
+        revocationKey := utils.TokenRevocationKey(claims, tokenString)
+        if revoker.IsRevoked(revocationKey) {
             utils.JSONError(c, http.StatusUnauthorized, "invalid token", "token has been revoked")
             c.Abort()
             return
@@ -43,7 +44,7 @@ func JWTAuthMiddleware(provider utils.JWTProvider, revoker utils.TokenRevoker) g
 
         c.Set(utils.ContextUserIDKey, claims.UserID)
         c.Set(utils.ContextUserRoleKey, claims.Role)
-        c.Set(utils.ContextTokenJTIKey, claims.ID)
+        c.Set(utils.ContextTokenJTIKey, revocationKey)
         c.Set(utils.ContextTokenExpKey, claims.ExpiresAt)
         c.Next()
     }

@@ -130,8 +130,8 @@ func (h *ComplaintController) GetDetail(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, h.mapToResponse(complaint))
 }
 
-// AddAttachment records an uploaded file's metadata against a complaint (no real
-// file storage exists anywhere in this app - same convention as other uploads).
+// AddAttachment records an uploaded file's metadata (including the URL from
+// POST /upload) against a complaint.
 func (h *ComplaintController) AddAttachment(c *gin.Context) {
 	userID, ok := utils.GetUserIDFromContext(c)
 	if !ok {
@@ -145,7 +145,7 @@ func (h *ComplaintController) AddAttachment(c *gin.Context) {
 		return
 	}
 	var complaint models.Complaint
-	if err := h.db.Where("id = ? AND user_id = ?", id, userID).First(&complaint).Error; err != nil {
+	if err := h.db.Where("complaint_id = ? AND user_id = ?", id, userID).First(&complaint).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "complaint not found", "no complaint exists with the given id")
 		return
 	}
@@ -165,6 +165,7 @@ func (h *ComplaintController) AddAttachment(c *gin.Context) {
 		FileName:    payload.FileName,
 		FileType:    payload.FileType,
 		FileSize:    payload.FileSize,
+		FileUrl:     payload.FileUrl,
 	}
 	if err := h.db.Create(attachment).Error; err != nil {
 		utils.JSONInternalError(c, "upload failed", err)
@@ -267,7 +268,7 @@ func (h *ComplaintController) mapToResponse(complaint *models.Complaint) dto.Com
 	}
 	attachments := make([]dto.ComplaintAttachmentResponse, 0, len(complaint.Attachments))
 	for _, a := range complaint.Attachments {
-		attachments = append(attachments, dto.ComplaintAttachmentResponse{FileName: a.FileName, FileSize: a.FileSize})
+		attachments = append(attachments, dto.ComplaintAttachmentResponse{FileName: a.FileName, FileSize: a.FileSize, FileUrl: a.FileUrl})
 	}
 
 	latestStatus := "submitted"

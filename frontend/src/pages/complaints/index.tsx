@@ -26,7 +26,8 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import { usePageTitle } from '../../components/usePageTitle'
 import { useAuth } from '../../auth/useAuth'
 import { ErrorAlert } from '../../components/ErrorAlert'
-import { ApiError } from '../../services/https'
+import { ApiError, getApiBaseUrl } from '../../services/https'
+import { uploadFile } from '../../services/https/upload'
 import {
   addComplaintAttachment,
   addComplaintHistory,
@@ -53,8 +54,11 @@ const roleLabel: Record<ComplaintActionRole, string> = {
   system: 'ระบบ',
 }
 
-const ALLOWED_UPLOAD_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp']
-const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+// Matches what POST /upload actually accepts (content-type sniffed server-side,
+// max 5MB) — advertising more than that here just leads to a confusing failure
+// after the picker closes.
+const ALLOWED_UPLOAD_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png', 'webp']
+const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024
 
 function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
@@ -124,13 +128,14 @@ function MyComplaintsView() {
   const [title, setTitle] = useState('')
   const [type, setType] = useState('')
   const [description, setDescription] = useState('')
-  const [attachments, setAttachments] = useState<{ file_name: string; file_size: number }[]>([])
+  const [attachments, setAttachments] = useState<{ file_name: string; file_size: number; file_type: string; file_url: string }[]>([])
   const [successOpen, setSuccessOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -186,7 +191,12 @@ function MyComplaintsView() {
       const created = await createComplaint(token, { title: title.trim(), description: description.trim(), reference_type: type })
       let finalComplaint = created
       for (const a of attachments) {
-        finalComplaint = await addComplaintAttachment(token, created.id, { file_name: a.file_name, file_size: a.file_size })
+        finalComplaint = await addComplaintAttachment(token, created.id, {
+          file_name: a.file_name,
+          file_size: a.file_size,
+          file_type: a.file_type,
+          file_url: a.file_url,
+        })
       }
       setComplaints((prev) => [finalComplaint, ...prev])
       closeForm()
@@ -203,12 +213,12 @@ function MyComplaintsView() {
     if (!file) return
     const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
     if (!ALLOWED_UPLOAD_EXTENSIONS.includes(extension)) {
-      setUploadError('ไฟล์ไม่รองรับ กรุณาเลือกไฟล์ PDF, Word, Excel, PowerPoint, Text, JPG, PNG, GIF หรือ WEBP')
+      setUploadError('ไฟล์ไม่รองรับ กรุณาเลือกไฟล์ PDF, JPG, PNG หรือ WEBP')
       setSelectedFile(null)
       return
     }
     if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-      setUploadError('ขนาดไฟล์เกิน 10 MB กรุณาเลือกไฟล์ใหม่')
+      setUploadError('ขนาดไฟล์เกิน 5 MB กรุณาเลือกไฟล์ใหม่')
       setSelectedFile(null)
       return
     }
@@ -222,10 +232,22 @@ function MyComplaintsView() {
     setUploadError(null)
   }
 
-  function confirmUpload() {
-    if (!selectedFile) return
-    setAttachments((prev) => [...prev, { file_name: selectedFile.name, file_size: selectedFile.size }])
-    closeUploadDialog()
+  async function confirmUpload() {
+    if (!selectedFile || !token) return
+    setUploading(true)
+    setUploadError(null)
+    try {
+      const url = await uploadFile(token, selectedFile)
+      setAttachments((prev) => [
+        ...prev,
+        { file_name: selectedFile.name, file_size: selectedFile.size, file_type: selectedFile.type, file_url: url },
+      ])
+      closeUploadDialog()
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : 'อัปโหลดไฟล์ไม่สำเร็จ')
+    } finally {
+      setUploading(false)
+    }
   }
 
   const selected = complaints.find((c) => c.id === selectedId) ?? null
@@ -268,7 +290,15 @@ function MyComplaintsView() {
                 {selected.attachments.map((a) => (
                   <Box key={a.file_name} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                     <InsertDriveFileOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-                    <Typography sx={{ fontSize: 13 }}>{a.file_name}</Typography>
+                    <Typography
+                      component="a"
+                      href={`${getApiBaseUrl()}${a.file_url}`}
+                      target="_blank"
+                      rel="noopener"
+                      sx={{ fontSize: 13, color: '#0F62FE' }}
+                    >
+                      {a.file_name}
+                    </Typography>
                   </Box>
                 ))}
               </Box>
@@ -451,7 +481,7 @@ function MyComplaintsView() {
                     sx={{ border: `1.5px dashed ${colors.border}`, borderRadius: 2, p: 2, textAlign: 'center', cursor: 'pointer', color: '#9AA0A6' }}
                   >
                     {attachments.length === 0 ? (
-                      <Typography sx={{ fontSize: 12 }}>รองรับไฟล์ PDF, Word, Excel, PowerPoint, JPG, PNG (ขนาดไม่เกิน 10MB)</Typography>
+                      <Typography sx={{ fontSize: 12 }}>รองรับไฟล์ PDF, JPG, PNG, WEBP (ขนาดไม่เกิน 5MB)</Typography>
                     ) : (
                       attachments.map((a) => (
                         <Box key={a.file_name} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
@@ -516,23 +546,22 @@ function MyComplaintsView() {
           </Box>
 
           <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.navy, mb: 0.5 }}>รองรับไฟล์:</Typography>
-          <Typography sx={{ fontSize: 12, color: '#333' }}>
-            • เอกสาร: PDF (.pdf), Word (.doc, .docx), Excel (.xls, .xlsx), PowerPoint (.ppt, .pptx), Text (.txt)
-          </Typography>
           <Typography sx={{ fontSize: 12, color: '#333', mb: 2 }}>
-            • รูปภาพ: JPG (.jpg, .jpeg), PNG (.png), GIF (.gif), WEBP (.webp)
+            • เอกสาร: PDF (.pdf)
             <br />
-            ขนาดไฟล์ไม่เกิน 10 MB
+            • รูปภาพ: JPG (.jpg, .jpeg), PNG (.png), WEBP (.webp)
+            <br />
+            ขนาดไฟล์ไม่เกิน 5 MB
           </Typography>
 
           <Button
             fullWidth
             variant="contained"
-            onClick={confirmUpload}
-            disabled={!selectedFile}
+            onClick={() => void confirmUpload()}
+            disabled={!selectedFile || uploading}
             sx={{ height: 50, borderRadius: '40px', textTransform: 'none', fontWeight: 600, bgcolor: colors.navy, '&:hover': { bgcolor: '#000226' } }}
           >
-            อัปโหลด
+            {uploading ? 'กำลังอัปโหลด…' : 'อัปโหลด'}
           </Button>
         </Box>
       </Dialog>
@@ -727,7 +756,15 @@ function AdminComplaintsView() {
                 {selected.attachments.map((a) => (
                   <Box key={a.file_name} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                     <InsertDriveFileOutlinedIcon fontSize="small" sx={{ color: colors.navy }} />
-                    <Typography sx={{ fontSize: 13 }}>{a.file_name}</Typography>
+                    <Typography
+                      component="a"
+                      href={`${getApiBaseUrl()}${a.file_url}`}
+                      target="_blank"
+                      rel="noopener"
+                      sx={{ fontSize: 13, color: '#0F62FE' }}
+                    >
+                      {a.file_name}
+                    </Typography>
                   </Box>
                 ))}
               </Box>

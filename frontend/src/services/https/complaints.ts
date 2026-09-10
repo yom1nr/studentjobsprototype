@@ -11,6 +11,7 @@ export type AddComplaintAttachmentRequest = {
   file_name: string
   file_type?: string
   file_size?: number
+  file_url: string
 }
 
 export type AddComplaintHistoryRequest = {

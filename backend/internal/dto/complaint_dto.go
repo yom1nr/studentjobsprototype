@@ -7,13 +7,13 @@ type CreateComplaintRequest struct {
 	ReferenceType string `json:"reference_type" validate:"omitempty"`
 }
 
-// AddComplaintAttachmentRequest records an uploaded file's metadata (no backend
-// file storage exists in this app — same UI-only-upload convention used
-// elsewhere, e.g. employer/student document uploads).
+// AddComplaintAttachmentRequest records an uploaded file's metadata, including
+// the URL returned by POST /upload (the actual file storage endpoint).
 type AddComplaintAttachmentRequest struct {
 	FileName string `json:"file_name" validate:"required"`
 	FileType string `json:"file_type" validate:"omitempty"`
 	FileSize int64  `json:"file_size" validate:"omitempty"`
+	FileUrl  string `json:"file_url" validate:"required,max=500"`
 }
 
 // AddComplaintHistoryRequest lets an admin move a complaint's status forward.
@@ -26,6 +26,7 @@ type AddComplaintHistoryRequest struct {
 type ComplaintAttachmentResponse struct {
 	FileName string `json:"file_name"`
 	FileSize int64  `json:"file_size"`
+	FileUrl  string `json:"file_url"`
 }
 
 // ComplaintHistoryResponse is one status-change entry.

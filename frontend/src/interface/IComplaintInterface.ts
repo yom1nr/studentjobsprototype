@@ -13,6 +13,7 @@ export type ComplaintHistoryEntry = {
 export type ComplaintAttachment = {
   file_name: string
   file_size: number
+  file_url: string
 }
 
 export type Complaint = {

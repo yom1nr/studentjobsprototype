@@ -69,7 +69,10 @@ func (h *PayrollController) CreatePayroll(c *gin.Context) {
 
 	totalHours := 0.0
 	for _, r := range records {
-		totalHours += r.CheckOutTime.Sub(r.CheckInTime).Hours()
+		diff := r.CheckOutTime.Sub(r.CheckInTime).Hours()
+		if diff > 0 {
+			totalHours += diff
+		}
 	}
 	netPay := totalHours * agreement.WageRate
 

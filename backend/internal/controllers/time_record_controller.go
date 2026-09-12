@@ -194,6 +194,10 @@ func (h *TimeRecordController) CreateEditRequest(c *gin.Context) {
 	}
 	var newCheckOutPtr *time.Time
 	if newCheckOut, err := time.Parse(time.RFC3339, payload.NewCheckOutTime); err == nil {
+		if newCheckOut.Before(newCheckIn) {
+			utils.JSONError(c, http.StatusBadRequest, "invalid new_check_out_time", "check-out time cannot be before check-in time")
+			return
+		}
 		newCheckOutPtr = &newCheckOut
 	}
 
@@ -421,7 +425,10 @@ func (h *TimeRecordController) mapToResponse(r *models.TimeRecord, studentName s
 	hours := 0.0
 	if r.CheckOutTime != nil {
 		checkOut = r.CheckOutTime.Format(time.RFC3339)
-		hours = r.CheckOutTime.Sub(r.CheckInTime).Hours()
+		diff := r.CheckOutTime.Sub(r.CheckInTime).Hours()
+		if diff > 0 {
+			hours = diff
+		}
 	}
 	var editResp *dto.TimeEditRequestResponse
 	if r.EditRequest != nil {

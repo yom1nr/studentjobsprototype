@@ -2,6 +2,33 @@ package models
 
 import "time"
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [B6733827] Entity / Model ของทั้ง 2 ระบบย่อย  =  Class Diagram หัวข้อ 7 → ตารางจริง
+//
+//	Class (Diagram)          struct (ไฟล์นี้)          ตาราง PostgreSQL (GORM AutoMigrate)
+//	─────────────────────    ──────────────────────    ────────────────────────────────
+//	InterviewSchedule        InterviewSchedule         interview_schedules
+//	RescheduleInterview      RescheduleInterview       reschedule_interviews
+//	RescheduleProposedSlot   RescheduleProposedSlot    reschedule_proposed_slots
+//	EmploymentAgreement      EmploymentAgreement       employment_agreements
+//	Document                 Document                  documents
+//
+// วิธีอ่าน struct tag ของ GORM
+//
+//	gorm:"primaryKey"                → PK
+//	gorm:"not null;index"            → FK ที่ทำ index ไว้ (query เร็ว)
+//	*uint / *time.Time (pointer)     → คอลัมน์ NULL ได้  (FK ที่ไม่บังคับ / เวลาที่ยังไม่เกิด)
+//	gorm:"size:50;default:'pending'" → VARCHAR(50) ค่าเริ่มต้น 'pending'
+//	gorm:"type:text"                 → TEXT (ข้อความยาว)
+//	gorm:"type:decimal(10,2)"        → เงิน (WageRate) ไม่ใช้ float ใน DB กันปัดเศษ
+//
+// ความสัมพันธ์ (field ที่เป็น slice/pointer ไปยัง struct อื่น)
+//
+//	[]X  + foreignKey  = has-many  (1 ── 0..*)      เช่น InterviewSchedule.Reschedules
+//	*X   + foreignKey  = has-one   (1 ── 0..1)      เช่น InterviewSchedule.Agreement
+//	*X   ที่อีกฝั่งถือ FK = belongs-to               เช่น EmploymentAgreement.InterviewSchedule
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 // InterviewSchedule represents an interview appointment between a Student and an Employer.
 // Location isn't a literal diagram attribute (same pragmatic addition as
 // EmploymentAgreement.Status above) — it stores the onsite address or the
@@ -15,15 +42,20 @@ type InterviewSchedule struct {
 	// (one per position), and each needs its own interview — keyed only by
 	// student, one appointment would mark every one of their applications as
 	// already scheduled. Nullable so rows created before this existed still load.
-	ApplicationID      *uint      `gorm:"index" json:"application_id"`
-	StudentID          uint       `gorm:"not null;index" json:"student_id"`
-	EmployerID         uint       `gorm:"not null;index" json:"employer_id"`
+	// FK → applications  : 1 ใบสมัคร มีนัดได้ 0..1  (Class Diagram: Application 1 ── 0..1)
+	// เป็น pointer (NULL ได้) เพราะแถวเก่าที่สร้างก่อนมี field นี้ต้องยังโหลดได้
+	ApplicationID *uint `gorm:"index" json:"application_id"`
+	// FK → students / employers  (Class Diagram: Student 1 ── 0..* , Employer 1 ── 0..*)
+	StudentID  uint `gorm:"not null;index" json:"student_id"`
+	EmployerID uint `gorm:"not null;index" json:"employer_id"`
+	// รายละเอียดนัด (U1): รูปแบบ online|onsite / เวลา "HH:MM" / วัน (timestamp เที่ยงคืน UTC) / สถานที่หรือลิงก์ / สิ่งที่ต้องเตรียม
 	InterviewFormat    string     `gorm:"size:100" json:"interview_format"` // online | onsite
 	AppointmentTime    string     `gorm:"size:20" json:"appointment_time"`  // e.g. "10:30"
 	AppointmentDate    *time.Time `json:"appointment_date"`
 	Location           string     `gorm:"size:500" json:"location"`
 	PreparationDetails string     `gorm:"type:text" json:"preparation_details"`
 
+	// สถานะ + ผล = สิ่งที่ UI ใช้วาด Chip และที่ controller ใช้เป็น guard (แก้/เลื่อน/ยืนยันไม่ได้เมื่อจบ)
 	// Status tracks where the appointment stands so the UI can render its badge
 	// ("รอการยืนยัน" / "สัมภาษณ์แล้ว" / "ยกเลิกนัด"). Previously ConfirmAttendance
 	// only fired a notification, so nothing could be queried back.
@@ -31,6 +63,7 @@ type InterviewSchedule struct {
 	Status      string     `gorm:"size:50;not null;default:'pending'" json:"status"`
 	ConfirmedAt *time.Time `json:"confirmed_at"`
 
+	// ผลสัมภาษณ์ (U5): "" = ยังไม่ประกาศ | passed | failed  + ความเห็น + เวลาที่ประกาศ  — passed คือประตูสู่ระบบจ้างงาน
 	// Result persists the interview outcome. It used to live only inside a
 	// notification message, which meant a student could not re-open the result
 	// page and an employer could not tell whether a result had been sent yet.
@@ -39,6 +72,7 @@ type InterviewSchedule struct {
 	ResultComment     string     `gorm:"type:text" json:"result_comment"`
 	ResultAnnouncedAt *time.Time `json:"result_announced_at"`
 
+	// ความสัมพันธ์ (GORM โหลดเมื่อสั่ง Preload): ประวัติเลื่อนนัด (0..*) / เอกสาร (0..*) / ข้อตกลง (0..1) / แจ้งเตือน (0..*)
 	// Relations
 	Reschedules   []RescheduleInterview `gorm:"foreignKey:InterviewScheduleID" json:"reschedules,omitempty"`
 	Documents     []Document            `gorm:"foreignKey:InterviewScheduleID" json:"documents,omitempty"`
@@ -46,6 +80,13 @@ type InterviewSchedule struct {
 	Notifications []Notification        `gorm:"foreignKey:InterviewScheduleID" json:"notifications,omitempty"`
 }
 
+// ── RescheduleInterview : 1 แถว = 1 คำขอเลื่อนนัด (U3) ───────────────────────────────
+//
+//	RequestedBy = "student"  → นศ. เสนอ 1 เวลาใน StudentAvailableDateTime → ผู้ประกอบการตอบ
+//	RequestedBy = "employer" → ผู้ประกอบการเสนอหลายเวลาใน ProposedSlots (ตารางลูก) → นศ. เลือก
+//	Status: pending → accepted | rejected      RespondedAt = เวลาที่ตอบ (NULL ขณะรอ)
+//	NewAppointmentDateTime = เวลาที่ตกลงกันได้ (กรอกเมื่อ accepted)
+//
 // RescheduleInterview records a request to change an interview time.
 type RescheduleInterview struct {
 	RescheduleID             uint       `gorm:"primaryKey" json:"reschedule_id"`
@@ -77,6 +118,12 @@ type RescheduleInterview struct {
 	Notifications []Notification           `gorm:"foreignKey:RescheduleInterviewID" json:"notifications,omitempty"`
 }
 
+// ── RescheduleProposedSlot : ตารางลูกของ RescheduleInterview (1 ── 0..*) ──────────────
+//
+//	เดิมเก็บเป็น text คั่น comma ในคอลัมน์เดียว → แยกเป็นตารางเพื่อ query/index ได้ต่อเวลา
+//	และให้ SelectRescheduleSlot เทียบ "เวลาที่ นศ. เลือก ∈ เวลาที่เสนอ" ด้วย SQL equality
+//	SlotAt เป็น timestamptz (เก็บ instant จริง) ต่างจาก appointment_date/time ที่แยก 2 คอลัมน์
+//
 // RescheduleProposedSlot is one time an employer offered as part of a
 // RescheduleInterview (RequestedBy="employer"). Previously these were joined
 // into a single comma-separated text column on RescheduleInterview, which
@@ -89,6 +136,14 @@ type RescheduleProposedSlot struct {
 	SlotAt                time.Time `gorm:"not null;index" json:"slot_at"`
 }
 
+// ── EmploymentAgreement : ข้อตกลงการจ้างงาน (U6/U7) ──────────────────────────────────
+//
+//	InterviewScheduleID (FK, NULL ได้) = นัดสัมภาษณ์ที่ข้อตกลงนี้เกิดจาก
+//	  → บังคับลำดับ "ผ่านสัมภาษณ์ก่อน ค่อยจ้าง"  และ 1 นัด มีข้อตกลงได้ 0..1
+//	เงื่อนไขสัญญา 6 ช่อง: StartDate, WageRate, DurationMonths, WorkingHours, LeavePolicy, AdditionalTerms
+//	Status: pending → accepted (มีผลบังคับ) | rejected (+RejectReason) → void (ลบแบบเก็บหลักฐาน)
+//	สัญญาหมดอายุ = StartDate + DurationMonths เดือน (คำนวณตอนใช้ ไม่เก็บซ้ำ)
+//
 // EmploymentAgreement is the contract between a Student and an Employer.
 // Status isn't a literal diagram attribute, but is needed to persist the
 // accept/reject decision — same pragmatic addition as Application.Status and
@@ -111,7 +166,7 @@ type EmploymentAgreement struct {
 	// row, so what was offered and why it was declined stays on file — it's
 	// just excluded from ListMine and from the "one offer per interview" check.
 	Status       string `gorm:"size:50;not null;default:'pending'" json:"status"`
-	RejectReason        string     `gorm:"type:text" json:"reject_reason"`
+	RejectReason string `gorm:"type:text" json:"reject_reason"`
 
 	// Belongs-to
 	InterviewSchedule *InterviewSchedule `gorm:"foreignKey:InterviewScheduleID" json:"interview_schedule,omitempty"`
@@ -122,6 +177,12 @@ type EmploymentAgreement struct {
 	Notifications []Notification `gorm:"foreignKey:EmploymentAgreementID" json:"notifications,omitempty"`
 }
 
+// ── Document : ไฟล์หลักฐานที่แนบได้ทั้งกับนัดสัมภาษณ์และข้อตกลง ───────────────────────
+//
+//	FK 2 ตัวเป็น NULL ได้ทั้งคู่ → เอกสารผูกกับฝั่งใดฝั่งหนึ่งหรือทั้งคู่ก็ได้
+//	(Class Diagram: InterviewSchedule 1 ── 0..* Document, EmploymentAgreement 1 ── 0..* Document)
+//	หมายเหตุ prototype รอบนี้: ตารางพร้อมแล้ว แต่การ generate ไฟล์สัญญายังไม่อยู่ใน scope
+//
 // Document is a contract file attached to an EmploymentAgreement (e.g. the signed
 // agreement PDF), per B6733827's class diagram class 10 (subsystem 1) / class 2
 // (subsystem 2) — the same Document class shared across both subsystems.

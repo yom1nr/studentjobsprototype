@@ -1,5 +1,10 @@
 import type { InterviewFormat } from './IJobInterface'
 
+// ═══ [B6733827] TypeScript type ของทั้ง 2 ระบบย่อย = รูปร่าง JSON ที่ backend ส่งมา ═══════
+// ตรงกับ dto/*.go ฝั่ง Go (snake_case เหมือนกัน) และสะท้อน Class Diagram หัวข้อ 7
+//   InterviewScheduleRecord  ↔ InterviewSchedule      RescheduleEntry ↔ RescheduleInterview (+ slots)
+//   AgreementRecord          ↔ EmploymentAgreement    *Request       = payload ที่หน้าจอส่งไป
+// ═════════════════════════════════════════════════════════════════════════════════════
 export type RescheduleEntry = {
   id: number
   /** Who asked. 'student' proposes one time for the employer to approve;
@@ -76,7 +81,8 @@ export type InterviewResultRequest = {
   comment?: string
 }
 
-export type AgreementStatus = 'pending' | 'accepted' | 'rejected'
+/** 'void' = ผู้ประกอบการลบข้อตกลงที่ถูกปฏิเสธ (soft delete) — ซ่อนจากผู้ใช้ทั่วไป เห็นเฉพาะมุมมองเจ้าหน้าที่ */
+export type AgreementStatus = 'pending' | 'accepted' | 'rejected' | 'void'
 
 export type AgreementRecord = {
   id: number

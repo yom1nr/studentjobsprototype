@@ -10,6 +10,20 @@ import type {
 } from '../../interface/IInterviewInterface'
 import { apiFetch } from './index'
 
+// ═══ [B6733827] ชั้นเรียก API ของระบบนัดหมายสัมภาษณ์ — 1 ฟังก์ชัน = 1 endpoint ═══════════
+//   listMyInterviews          GET  /interviews                                 U8
+//   createInterview           POST /employer/interviews                        U1
+//   updateInterview           PUT  /employer/interviews/:id                    U1
+//   requestReschedule         POST /student/interviews/:id/reschedule          U3 (นศ. เสนอ 1 เวลา)
+//   offerRescheduleSlots      POST /employer/interviews/:id/reschedule-offer   U3 (ผู้ประกอบการเสนอ ≤5)
+//   listReschedules           GET  /interviews/:id/reschedules                 U3/U8
+//   approveReschedule/reject  POST /employer/reschedules/:id/approve|reject    U3
+//   selectRescheduleSlot      POST /student/reschedules/:id/select             U3
+//   sendInterviewResult       POST /employer/interviews/:id/result             U5
+//   confirmInterviewAttendance POST /student/interviews/:id/confirm            U2
+//   listAllInterviews         GET  /admin/interviews                           U8 (University Staff)
+// apiFetch แนบ Authorization: Bearer <token> และแปลง error เป็น ApiError ให้หน้าจอแสดง
+// ═════════════════════════════════════════════════════════════════════════════════════
 export function listMyInterviews(token: string): Promise<InterviewScheduleRecord[]> {
   return apiFetch<InterviewScheduleRecord[]>('/api/v1/interviews', { token })
 }
@@ -57,4 +71,9 @@ export function sendInterviewResult(token: string, id: number, payload: Intervie
 
 export function confirmInterviewAttendance(token: string, id: number): Promise<{ confirmed: boolean }> {
   return apiFetch<{ confirmed: boolean }>(`/api/v1/student/interviews/${id}/confirm`, { method: 'POST', token })
+}
+
+/** [U8 · University Staff] Every interview in the system — admin read-only history. */
+export function listAllInterviews(token: string): Promise<InterviewScheduleRecord[]> {
+  return apiFetch<InterviewScheduleRecord[]>('/api/v1/admin/interviews', { token })
 }

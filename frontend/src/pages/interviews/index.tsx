@@ -39,8 +39,28 @@ import {
 import type { Application } from '../../interface/IJobInterface'
 import type { AgreementRecord, InterviewScheduleRecord, RescheduleEntry } from '../../interface/IInterviewInterface'
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [B6733827] หน้าจอระบบย่อยที่ 1 : นัดหมายสัมภาษณ์  (lifeline ":InterviewUI" ใน Sequence)
+//
+// ไฟล์เดียว 2 มุมมอง เลือกตาม role ใน JWT (ดู InterviewsPage ท้ายไฟล์)
+//   StudentInterviewsView  → U2 ยืนยันเข้าสัมภาษณ์, U3 ขอเลื่อน / เลือกเวลาที่เสนอ, ดูผล U5
+//   EmployerInterviewsView → U1 นัด/แก้นัด, U3 เสนอเวลา / อนุมัติ-ปฏิเสธ, U5 ประกาศผล
+//
+// การไหลของข้อมูล:  services/https/interviews.ts (1 ฟังก์ชัน = 1 endpoint)
+//                   ──► backend InterviewController ──► PostgreSQL
+//   type ทุกตัวอยู่ใน interface/IInterviewInterface.ts (InterviewScheduleRecord, RescheduleEntry)
+//
+// เทคนิค React ที่ใช้
+//   useState   เก็บฟอร์ม / dialog / loading / error       (ประมาณ 40 ตัว)
+//   useEffect  โหลดข้อมูลตอน mount ด้วย async load() + cancelled flag (กัน race, ผ่าน lint set-state-in-effect)
+//   useMemo    เลือกนัดที่จะแสดง (pickInterview) ไม่คำนวณซ้ำทุก render
+//   useAuth    token + role   /   useNavigate เด้งหน้า   /   MUI Dialog, Chip, TextField
+//
+// หลัก UX: "ทำไม่ได้ = ไม่แสดงตัวเลือก" (กรอง dropdown ให้ตรงกฎ API) แต่กฎจริงบังคับที่ backend เสมอ
+// ═══════════════════════════════════════════════════════════════════════════════
 const colors = { navy: '#012150', border: '#DDE1E6', ok: '#217829' }
 
+// เวลาทั้งระบบส่ง/เก็บเป็น UTC RFC3339 และแสดง "ตัวเลขเดิม" ไม่แปลง timezone — 13:30 ต้องไม่กลายเป็น 20:30
 /** Slots travel as RFC3339 in UTC and the wall clock in them is the time both
  *  sides agreed to, so render those digits rather than shifting to the viewer's
  *  zone — a 13:30 interview must not read as 20:30 for a reader in Bangkok. */
@@ -56,6 +76,7 @@ function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
 }
 
+// นศ. มีหลายนัดได้ (คนละใบสมัคร) → เลือกนัดที่ควรโชว์: ลิงก์จากแจ้งเตือน > นัดที่รอตอบ > นัดที่ยังไม่จบ > ล่าสุด
 /** Which of the student's interviews to put on screen. A deep link from a
  *  notification (?interview=<id>) wins; then the one that needs an answer
  *  (mid-reschedule); then any still-live one; then the most recent. Without
@@ -77,6 +98,7 @@ function pickInterview(
   )
 }
 
+// การ์ดขั้นตอน 3 ใบ (นัดหมาย → ยืนยัน/เลื่อน → ผล) — ใบที่จบแล้วเป็นสีเทา+ไอคอนล็อก แก้ไม่ได้
 function StepCard({
   step,
   title,
@@ -167,6 +189,13 @@ function GmailConfirmDialog({
   )
 }
 
+// ┌─ มุมมองนักศึกษา ──────────────────────────────────────────────────────────────────┐
+// │ Activity Diagram: "Review appointment details" → ◇ Available on schedule?         │
+// │   Available     → confirmAttendance()  (U2)                                       │
+// │   Not available → submitReschedule()   (U3 ทางที่ 1: เสนอ 1 เวลา รอผู้ประกอบการอนุมัติ)│
+// │ ถ้าผู้ประกอบการเสนอเวลามา (U3 ทางที่ 2) → radio list → chooseSlot()                 │
+// │ สถานะที่โชว์ (Chip) อ่านจาก interview.status / result ของจริงใน DB ไม่ใช่ state ในหน้า │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // ─────────────────────────── Student side ───────────────────────────
 function StudentInterviewsView() {
   usePageTitle('ประกาศกำหนดการสัมภาษณ์ / ผลการสัมภาษณ์')
@@ -175,11 +204,13 @@ function StudentInterviewsView() {
   const [searchParams] = useSearchParams()
   const targetInterviewId = Number(searchParams.get('interview')) || null
 
+  // ── state หลัก: นัดทั้งหมดจาก API / กำลังโหลด / ข้อความ error / หน้าย่อยที่ดูอยู่ (list = การ์ด 3 ใบ, appointment = รายละเอียด)
   const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'list' | 'appointment'>('list')
 
+  // ── state ฟอร์มขอเลื่อนนัด (U3 ทางที่ 1): dialog เปิด?, วัน, เวลา, เหตุผล, กำลังส่ง?, ส่งไปแล้ว?
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [rescheduleDate, setRescheduleDate] = useState('')
   const [rescheduleTime, setRescheduleTime] = useState('')
@@ -187,15 +218,18 @@ function StudentInterviewsView() {
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
   const [rescheduleRequested, setRescheduleRequested] = useState(false)
 
+  // ── state ปุ่มยืนยันเข้าสัมภาษณ์ (U2): กำลังส่ง? / ยืนยันแล้ว (optimistic)
   const [confirming, setConfirming] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
 
+  // ── ประวัติคำขอเลื่อนของนัดนี้ + reloadToken (บวก 1 = สั่งโหลดใหม่) + การเลือกเวลาที่ผู้ประกอบการเสนอ (U3 ทางที่ 2)
   const [reschedules, setReschedules] = useState<RescheduleEntry[]>([])
   const [reloadToken, setReloadToken] = useState(0)
   const [chosenSlot, setChosenSlot] = useState('')
   const [choosing, setChoosing] = useState(false)
   const [slotConfirmed, setSlotConfirmed] = useState<string | null>(null)
 
+  // โหลดนัดทั้งหมดของฉัน (GET /interviews) ตอนเปิดหน้า และทุกครั้งที่ reloadToken เปลี่ยน — cancelled กันผลลัพธ์เก่าทับใหม่
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -244,6 +278,7 @@ function StudentInterviewsView() {
   // rescheduling / completed / cancelled). `confirmed` below is only an optimistic
   // flag for the moment right after the student clicks, so reading it alone made
   // every reloaded appointment look like it was still waiting to happen.
+  // สถานะจริงมาจาก record (backend เป็น source of truth) — confirmed ในหน้าเป็นแค่ optimistic ชั่วคราวหลังกด
   const isFinished = interview != null && (interview.status === 'completed' || interview.result !== '')
   const isCancelled = interview?.status === 'cancelled'
   const isConfirmed = confirmed || interview?.status === 'confirmed'
@@ -251,10 +286,12 @@ function StudentInterviewsView() {
   // A reschedule can be waiting on either side, and which side decides what the
   // student is shown: their own request waits for the employer's answer, while
   // the employer's offer is waiting on the student to pick a time.
+  // มีคำขอเลื่อนค้างไหม และของฝั่งไหน → ตัดสินว่าจะโชว์ "รออนุมัติ" (ของฉัน) หรือ "กรุณาเลือกเวลา" (ของผู้ประกอบการ)
   const pendingRequest = reschedules.find((r) => r.status === 'pending')
   const awaitingEmployerApproval = pendingRequest?.requested_by === 'student'
   const slotOffer = pendingRequest?.requested_by === 'employer' ? pendingRequest : null
 
+  // Chip สถานะบนการ์ด — เรียงความสำคัญ: จบแล้ว > ยกเลิก > รออนุมัติเลื่อน > รอเลือกเวลา > ยืนยันแล้ว > รอยืนยัน
   const appointmentChip = isFinished
     ? { label: 'สัมภาษณ์เสร็จสิ้น', color: '#217829', bg: '#EAF7EA' }
     : isCancelled
@@ -267,6 +304,7 @@ function StudentInterviewsView() {
             ? { label: 'รอผลการสัมภาษณ์', color: colors.ok, bg: '#EAF7EA' }
             : { label: 'รอยืนยันเข้าสัมภาษณ์', color: '#B5850C', bg: '#FFF0DD' }
 
+  // [U3] นศ. เลือก 1 เวลาจากที่ผู้ประกอบการเสนอ → POST /student/reschedules/:id/select
   async function chooseSlot() {
     if (!token || !slotOffer || !chosenSlot) return
     setChoosing(true)
@@ -282,6 +320,7 @@ function StudentInterviewsView() {
     }
   }
 
+  // [U3] นศ. ขอเลื่อนนัด → POST /student/interviews/:id/reschedule  (date+time ในฟอร์ม → RFC3339 UTC)
   async function submitReschedule() {
     // The submit button is disabled until both fields are filled (below), so
     // this is reachable only once there's a real value to send.
@@ -301,6 +340,7 @@ function StudentInterviewsView() {
     }
   }
 
+  // [U2] นศ. ยืนยันเข้าสัมภาษณ์ → POST /student/interviews/:id/confirm → backend แจ้งผู้ประกอบการ (U4)
   async function confirmAttendance() {
     if (!token || !interview) return
     setConfirming(true)
@@ -319,6 +359,7 @@ function StudentInterviewsView() {
     return <Box sx={{ maxWidth: 850, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
   }
 
+  // ── หน้าว่าง: API คืน [] (กรองด้วย student_id — นัดของคนอื่นไม่โผล่)
   if (!interview) {
     return (
       <Box sx={{ maxWidth: 700, mx: 'auto', textAlign: 'center', py: 8 }}>
@@ -330,6 +371,7 @@ function StudentInterviewsView() {
     )
   }
 
+  // ── หน้า "รายละเอียดนัดสัมภาษณ์" (กดจากการ์ดใบ 1): ซ้าย = ข้อมูลนัด / ขวา = ปุ่มยืนยัน (U2) + ขอเลื่อน (U3)
   if (view === 'appointment') {
     return (
       <Box sx={{ maxWidth: 950, mx: 'auto' }}>
@@ -414,6 +456,7 @@ function StudentInterviewsView() {
           </Box>
         </Box>
 
+        {/* Dialog ขอเลื่อนนัด (U3 ทางที่ 1): วัน + เวลา + เหตุผล — ปุ่มส่ง disabled จนกรอกครบ → submitReschedule() */}
         <Dialog open={rescheduleOpen} onClose={() => setRescheduleOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
           <Box sx={{ p: 3.5 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -452,6 +495,7 @@ function StudentInterviewsView() {
     )
   }
 
+  // ── หน้าหลักนักศึกษา (view = 'list'): การ์ดใบ 1 นัดหมาย → กล่องคำขอเลื่อน (ถ้ามี) → การ์ดใบ 2 ผลสัมภาษณ์
   return (
     <Box sx={{ maxWidth: 850, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <ErrorAlert message={error} />
@@ -468,6 +512,7 @@ function StudentInterviewsView() {
         onAction={() => setView('appointment')}
       />
 
+      {/* [U3 ทางที่ 2] ผู้ประกอบการเสนอเวลา → radio เลือก 1 → ปุ่มยืนยัน → chooseSlot() */}
       {/* The employer offered times and is waiting on the student — this is the
           one thing blocking the interview, so it goes above the result card. */}
       {slotOffer && (
@@ -516,6 +561,7 @@ function StudentInterviewsView() {
         </Box>
       )}
 
+      {/* [U3 ทางที่ 1] ฉันขอเลื่อนไปแล้ว รอผู้ประกอบการตอบ — กำหนดการเดิมยังมีผล */}
       {/* Waiting on the employer to answer the student's own request. */}
       {awaitingEmployerApproval && pendingRequest && (
         <Box sx={{ border: `1px solid ${colors.border}`, bgcolor: '#FFFBEB', borderRadius: 3, p: 3 }}>
@@ -542,6 +588,7 @@ function StudentInterviewsView() {
         </Box>
       )}
 
+      {/* [U5] ผลสัมภาษณ์: passed → การ์ดเขียว + ปุ่มไปหน้าข้อตกลง (U6/U7) / failed → การ์ดเทา / ยังไม่ประกาศ → การ์ดใบ 2 "รอผล" */}
       {/* The outcome is persisted on the interview, so show it here instead of
           sending the student off to dig through notifications. Only fall back to
           the "watch your notifications" card while no result has been announced. */}
@@ -616,13 +663,13 @@ function StudentInterviewsView() {
 }
 
 // ─────────────────────────── Employer side ───────────────────────────
-// Wired to the real backend (B6733827): candidates come from the employer's
-// accepted applications (existing /employer/applications endpoint); scheduling,
-// reschedule requests, and interview-result notifications go through the new
-// interview endpoints. There's no persisted "confirmed"/"interviewed"/"passed"
-// field on InterviewSchedule (not in the class diagram — see
-// interview_dto.go's InterviewResultRequest comment), so those states are
-// derived loosely (has-interview / has-agreement) rather than tracked exactly.
+// ┌─ มุมมองผู้ประกอบการ ──────────────────────────────────────────────────────────────┐
+// │ subview: picker (เลือกผู้สมัคร) → hub (ศูนย์รวม) → schedule (U1) / reschedule (U3) │
+// │          / results (U5) / detail                                                  │
+// │ รายชื่อผู้สมัครมาจาก /employer/applications ที่ status = accepted                   │
+// │ สถานะจริง (pending/confirmed/rescheduling/completed + result) อ่านจาก              │
+// │ InterviewSchedule ใน DB โดยตรง — เก็บถาวรใน backend ไม่ได้เดาจากหน้า                │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 
 type EmployerSubview = 'picker' | 'hub' | 'schedule' | 'detail' | 'reschedule' | 'results'
 
@@ -631,14 +678,17 @@ function EmployerInterviewsView() {
   const { token } = useAuth()
   const navigate = useNavigate()
 
+  // ── ข้อมูลจาก API 3 ชุด: ใบสมัครที่ accepted / นัดทั้งหมดของฉัน / ข้อตกลงทั้งหมดของฉัน
   const [applications, setApplications] = useState<Application[]>([])
   const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // ── ผู้สมัครที่เลือกอยู่ + หน้าย่อยที่ดูอยู่ (picker → hub → schedule / detail / reschedule / results)
   const [selectedApplicationId, setSelectedApplicationId] = useState<number | null>(null)
   const [subview, setSubview] = useState<EmployerSubview>('picker')
 
+  // ── ฟอร์มนัดสัมภาษณ์ (U1): วัน เวลา รูปแบบ สถานที่ สิ่งที่ต้องเตรียม
   const [scheduleDate, setScheduleDate] = useState('')
   const [scheduleTime, setScheduleTime] = useState('')
   const [scheduleFormat, setScheduleFormat] = useState<'onsite' | 'online'>('onsite')
@@ -646,6 +696,7 @@ function EmployerInterviewsView() {
   const [schedulePrep, setSchedulePrep] = useState('')
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false)
 
+  // ── ฟอร์มเสนอเวลาใหม่ (U3 ทางที่ 2): เหตุผล + ช่องเวลา 3 ช่อง (offerSlots) + คำขอที่ค้างของนัดนี้ (reschedules)
   const [rescheduleNote, setRescheduleNote] = useState('')
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
   const [rescheduleConfirmOpen, setRescheduleConfirmOpen] = useState(false)
@@ -658,16 +709,19 @@ function EmployerInterviewsView() {
   const [respondingId, setRespondingId] = useState<number | null>(null)
   const [agreements, setAgreements] = useState<AgreementRecord[]>([])
 
+  // ── ฟอร์มประกาศผล (U5): ความเห็น + กำลังส่ง? + dialog สำเร็จ
   const [resultComment, setResultComment] = useState('')
   const [resultSubmitting, setResultSubmitting] = useState(false)
   const [resultsConfirmOpen, setResultsConfirmOpen] = useState(false)
 
   // The date+time inputs are wall clock; the API takes RFC3339. Tagging them as
   // UTC keeps the digits the employer typed intact end to end (see formatSlot).
+  // ช่องเวลาที่กรอกครบ → แปลงเป็น RFC3339 UTC (เช่น 2026-09-25T09:00:00Z) ส่งให้ API
   const filledOfferSlots = offerSlots
     .filter((s) => s.date && s.time)
     .map((s) => `${s.date}T${s.time}:00Z`)
 
+  // โหลด 3 ชุดพร้อมกัน (Promise.all) — เรียกซ้ำหลังทุก action เพื่อให้หน้าจอตรงกับ DB เสมอ
   async function load() {
     if (!token) return
     setLoading(true)
@@ -704,12 +758,16 @@ function EmployerInterviewsView() {
     return () => { cancelled = true }
   }, [token])
 
+  // จับคู่นัดกับ "ใบสมัคร" ไม่ใช่ "คน"  (Class Diagram: Application 1 ── 0..1 InterviewSchedule)
   // Matched per application, not per student: one candidate can hold several
   // accepted applications with this employer, and each is scheduled separately.
   function interviewFor(applicationId: number): InterviewScheduleRecord | null {
     return interviews.find((iv) => iv.application_id === applicationId) ?? null
   }
 
+  // ── กฎระดับ "ตำแหน่ง" ──────────────────────────────────────────────────────────
+  // ตำแหน่งที่มีข้อตกลงแล้ว (จ้างแล้ว / รอตอบ / ถูกปฏิเสธ) หายจากรายชื่อนัดสัมภาษณ์
+  // แต่ตำแหน่งอื่นของคนเดียวกันยังอยู่ — ตรงกับกฎ backend (CreateAgreement: 1 นัด = 1 ข้อตกลง)
   // Once a position reaches the agreement stage its interview work is over —
   // hired, declined, or waiting on the student, there is nothing left to schedule
   // or announce here. It closes that position only: other positions the same
@@ -723,6 +781,7 @@ function EmployerInterviewsView() {
   const inPlay = applications.filter((a) => !settledApplicationIds.has(a.id))
   const settledCount = applications.length - inPlay.length
 
+  // แบ่ง 2 กลุ่มให้หน้า picker: ยังไม่นัด / นัดแล้ว
   const notScheduled = inPlay.filter((a) => !interviewFor(a.id))
   const scheduled = inPlay.filter((a) => interviewFor(a.id))
 
@@ -750,9 +809,11 @@ function EmployerInterviewsView() {
     return () => { cancelled = true }
   }, [token, selectedInterviewId, interviews])
 
+  // คำขอเลื่อนที่ค้าง: มาจาก นศ. (เราต้องตอบ) หรือของเราเอง (รอ นศ. เลือก)
   const pendingStudentRequest = reschedules.find((r) => r.status === 'pending' && r.requested_by === 'student') ?? null
   const pendingOwnOffer = reschedules.find((r) => r.status === 'pending' && r.requested_by === 'employer') ?? null
 
+  // [U3] ผู้ประกอบการตอบคำขอเลื่อนของ นศ. → POST /employer/reschedules/:id/approve | reject แล้ว reload
   async function respondToReschedule(rescheduleId: number, approve: boolean) {
     if (!token) return
     setRespondingId(rescheduleId)
@@ -774,6 +835,7 @@ function EmployerInterviewsView() {
     setSubview('hub')
   }
 
+  // [U1] สร้างนัด (POST /employer/interviews) หรือแก้นัดเดิม (PUT /employer/interviews/:id) — ฟอร์มเดียวกัน
   async function submitSchedule() {
     if (!token || !selectedApplicationId) return
     setScheduleSubmitting(true)
@@ -799,6 +861,7 @@ function EmployerInterviewsView() {
     }
   }
 
+  // เปิดฟอร์มนัด: มีนัดอยู่แล้ว → เติมค่าเดิม (แก้ไข) / ยังไม่มี → ฟอร์มว่าง (สร้างใหม่)
   function openSchedule() {
     if (selectedInterview) {
       setScheduleDate(selectedInterview.appointment_date)
@@ -816,6 +879,7 @@ function EmployerInterviewsView() {
     setSubview('schedule')
   }
 
+  // [U3 ทางที่ 2] ผู้ประกอบการเสนอหลายเวลา → POST /employer/interviews/:id/reschedule-offer (proposed_slots[])
   async function submitReschedule() {
     if (!token || !selectedInterview) return
     setRescheduleSubmitting(true)
@@ -833,6 +897,7 @@ function EmployerInterviewsView() {
     }
   }
 
+  // [U5] ประกาศผล → POST /employer/interviews/:id/result  — ผล "passed" เปิดทางให้ระบบตกลงจ้างงาน (U6)
   async function submitResult(result: 'passed' | 'failed') {
     if (!token || !selectedInterview) return
     // A result is announced once. Guarding here as well as on the hub row keeps a
@@ -861,6 +926,7 @@ function EmployerInterviewsView() {
     return <Box sx={{ maxWidth: 1100, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
   }
 
+  // ── แถบหัวของ hub: ชื่อ/ตำแหน่งผู้สมัคร + Chip สถานะ (ยังไม่นัด / รอผล / ผ่าน / ไม่ผ่าน) + ปุ่มเปลี่ยนคน
   const HubHeader = selectedApplication && (
     <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, flexWrap: 'wrap', gap: 1.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -897,6 +963,7 @@ function EmployerInterviewsView() {
     </Box>
   )
 
+  // ── หน้า picker: รายชื่อผู้สมัครที่ผ่านคัดเลือก แบ่ง "ยังไม่นัด" / "นัดแล้ว" — ตำแหน่งที่มีข้อตกลงแล้วถูกซ่อน (บอกจำนวนไว้)
   if (subview === 'picker' || !selectedApplication) {
     return (
       <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
@@ -961,6 +1028,7 @@ function EmployerInterviewsView() {
     )
   }
 
+  // ── หน้า hub: การ์ด 1 ระบบนัดสัมภาษณ์ (5 เมนู) + การ์ด 2 ระบบตกลงจ้างงาน (ล็อกจน result === 'passed')
   if (subview === 'hub') {
     const unlocked = selectedInterview?.result === 'passed'
     // Once the result is out the appointment is closed: it can't be re-timed,
@@ -1002,6 +1070,7 @@ function EmployerInterviewsView() {
                 การสัมภาษณ์ของผู้สมัครคนนี้เสร็จสิ้นแล้ว ดูย้อนหลังได้ที่ &quot;รายละเอียดนัดหมาย&quot;
               </Box>
             )}
+            {/* 5 เมนูของระบบ 1 — disabled ตามสถานะ: ประกาศผลแล้ว (announced) ปิดทุกอย่างยกเว้น "รายละเอียด" กับ "แจ้งเตือน" */}
             {[
               { icon: <EventOutlinedIcon fontSize="small" />, label: selectedInterview ? 'แก้ไขนัดหมายสัมภาษณ์' : 'กำหนดนัดหมายสัมภาษณ์', action: openSchedule, disabled: announced },
               // Viewing the finished appointment changes nothing, so it stays open.
@@ -1022,6 +1091,7 @@ function EmployerInterviewsView() {
             ))}
           </Box>
 
+          {/* การ์ด 2: ตกลงจ้างงาน — unlocked เมื่อ result === 'passed' (U6 «extend» U5) / ไม่ผ่านหรือยังไม่ประกาศ → ล็อก + บอกเหตุผลสีแดง */}
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 2.5, opacity: unlocked ? 1 : 0.85 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -1087,6 +1157,7 @@ function EmployerInterviewsView() {
     <Button onClick={() => setSubview('hub')} sx={{ textTransform: 'none', color: colors.navy, mb: 1.5, px: 0 }}>← กลับ</Button>
   )
 
+  // ── หน้าฟอร์มนัด (U1): สร้างหรือแก้ไข → submitSchedule() ตัดสินเองว่า POST หรือ PUT
   if (subview === 'schedule') {
     return (
       <Box sx={{ maxWidth: 950, mx: 'auto' }}>
@@ -1137,6 +1208,7 @@ function EmployerInterviewsView() {
     )
   }
 
+  // ── หน้ารายละเอียดนัด (อ่านอย่างเดียว) — เปิดได้แม้ประกาศผลแล้ว
   if (subview === 'detail' && selectedInterview) {
     return (
       <Box sx={{ maxWidth: 700, mx: 'auto' }}>
@@ -1163,6 +1235,7 @@ function EmployerInterviewsView() {
     )
   }
 
+  // ── หน้าเลื่อนนัด (U3): บน = คำขอจาก นศ. ที่รอตอบ (อนุมัติ/ปฏิเสธ → respondToReschedule) / ล่าง = ฟอร์มเสนอเวลา 3 ช่องของเรา
   if (subview === 'reschedule' && selectedInterview) {
     return (
       <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
@@ -1286,6 +1359,7 @@ function EmployerInterviewsView() {
     )
   }
 
+  // ── หน้าประกาศผล (U5): ความเห็น + ปุ่ม ผ่าน / ไม่ผ่าน → submitResult('passed' | 'failed')
   if (subview === 'results' && selectedInterview) {
     return (
       <Box sx={{ maxWidth: 700, mx: 'auto' }}>
@@ -1337,6 +1411,7 @@ function EmployerInterviewsView() {
   return null
 }
 
+// จุดเข้า: อ่าน role จาก useAuth() → เรนเดอร์มุมมองผู้ประกอบการหรือนักศึกษา (route เดียว 2 หน้าที่)
 export default function InterviewsPage() {
   const { user } = useAuth()
   return user?.role === 'employer' ? <EmployerInterviewsView /> : <StudentInterviewsView />

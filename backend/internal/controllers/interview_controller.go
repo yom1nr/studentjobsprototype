@@ -19,6 +19,38 @@ import (
 	"github.com/SA/Golang-Backend-Example/internal/utils"
 )
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [B6733827] ระบบย่อยที่ 1 : ระบบจัดการนัดหมายสัมภาษณ์ (Interview Appointment)
+//
+// ไฟล์นี้คือ lifeline ":InterviewController" ใน Sequence Diagram
+//
+//	หน้า React (pages/interviews/index.tsx) ──HTTP──► handler ในไฟล์นี้
+//	──► ตรวจสิทธิ์ (JWT/role/เจ้าของ) ──► ตรวจกฎธุรกิจ ──► เขียนตารางผ่าน GORM
+//	──► ส่งแจ้งเตือน U4 (notifyAboutInterview / notifyAboutReschedule ท้ายไฟล์)
+//
+// Use Case ที่ไฟล์นี้รองรับ  (ดู Use Case Diagram หัวข้อ 4.3)
+//
+//	U1 Schedule Interview Appointment      → CreateInterview, UpdateInterview
+//	U2 Confirm Appointment Acknowledgement → ConfirmAttendance
+//	U3 Reschedule Interview                → RequestReschedule (นศ. เสนอ 1 เวลา)
+//	                                         OfferRescheduleSlots (ผู้ประกอบการเสนอ ≤5 เวลา)
+//	                                         ApproveReschedule / RejectReschedule (ผู้ประกอบการตอบ)
+//	                                         SelectRescheduleSlot (นศ. เลือก)
+//	U4 Send Notifications                  → notifyAboutInterview / notifyAboutReschedule
+//	U5 Notify Applicant Screening Result   → SendResult
+//	U8 View History                        → ListMine, ListReschedules (ตัวเอง) · ListAll (แอดมิน/University Staff)
+//
+// ตารางที่เขียน (Class Diagram หัวข้อ 7)
+//
+//	interview_schedules ─1..*─ reschedule_interviews ─1..*─ reschedule_proposed_slots
+//	interview_schedules ─1..*─ notifications
+//
+// วงจรสถานะ InterviewSchedule.Status
+//
+//	pending ─(นศ.ยืนยัน U2)─► confirmed ─(มีคำขอเลื่อน U3)─► rescheduling ─(ตอบคำขอ)─► confirmed
+//	─(ประกาศผล U5)─► completed          หรือ  cancelled
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 // InterviewController manages interview scheduling between employers and students (B6733827 subsystem 1).
 type InterviewController struct {
 	db       *gorm.DB
@@ -30,6 +62,18 @@ func NewInterviewController(db *gorm.DB) *InterviewController {
 	return &InterviewController{db: db, validate: validator.New()}
 }
 
+// ┌─ [U1] POST /api/v1/employer/interviews ─ ผู้ประกอบการสร้างนัดสัมภาษณ์ ────────────┐
+// │ ตรงกับ Sequence Diagram 1 (หัวข้อ 8.3) ข้อ 4–13                                  │
+// │   4    createInterview(interviewData)  ← request เข้าฟังก์ชันนี้                  │
+// │   5    validate(interviewData)         → ShouldBindJSON + validate.Struct         │
+// │   5.1  error("fill in all required")   → 400 ถ้าไม่ครบ                            │
+// │   6–7  checkApplication(applicationID) → ใบสมัครเป็นของเรา + accepted + ยังไม่มีนัด │
+// │   7.1  error("already has an interview")→ 400                                     │
+// │   8–10 create(status="pending") + save → h.db.Create(interview)                    │
+// │   11–12 notifyStudent + saveNotification → notifyUser(...)                         │
+// │   13   success(interviewSchedule)      → JSONSuccess 201                          │
+// │ กฎ: 1 ใบสมัคร = 1 นัด  (Class Diagram: Application 1 ── 0..1 InterviewSchedule)    │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // CreateInterview schedules a new interview appointment for a student.
 func (h *InterviewController) CreateInterview(c *gin.Context) {
 	employer, ok := h.currentEmployer(c)
@@ -37,6 +81,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 1 ผ่านแล้ว (currentEmployer = ผู้เรียกเป็นผู้ประกอบการ) → ขั้น 2: อ่าน JSON → DTO แล้ว validate ช่องบังคับ
 	var payload dto.CreateInterviewRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
@@ -50,6 +95,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 	// The application is the anchor: it proves the student applied to a post of
 	// yours and that you accepted them, so the flow apply → accept → interview
 	// can't be skipped, and it says which position the appointment is for.
+	// ขั้น 3: หาใบสมัคร — ต้องเป็นใบสมัครของประกาศงาน "ของเรา" (subquery jobposts.user_id = employer) ไม่ใช่ → 404
 	var application models.Application
 	err := h.db.Where("application_id = ? AND jobpost_id IN (?)", payload.ApplicationID,
 		h.db.Model(&models.Jobpost{}).Select("jobpost_id").Where("user_id = ?", employer.UserID)).
@@ -62,11 +108,13 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		}
 		return
 	}
+	// กฎลำดับงาน (Activity Diagram): สมัคร → ผ่านคัดเลือก → *ค่อย* นัดสัมภาษณ์ — ข้ามขั้นไม่ได้
 	if application.Status != "accepted" {
 		utils.JSONError(c, http.StatusBadRequest, "create failed", "accept this application before scheduling an interview for it")
 		return
 	}
 
+	// ขั้น 4: ดึงนักศึกษาเจ้าของใบสมัคร (เอา id ไปใส่นัด + ส่งแจ้งเตือน)
 	var student models.Student
 	if err := h.db.First(&student, application.StudentID).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "student not found", "no student exists for this application")
@@ -78,6 +126,7 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 	// application rule below already stops the declined application itself from
 	// being scheduled again.
 
+	// Sequence ข้อ 6–7 + opt 7.1 : ใบสมัครนี้มีนัดค้างอยู่แล้วหรือยัง (ไม่นับที่ cancelled)
 	// One live appointment per application — the UI shows a single appointment
 	// per application row, so a second would silently become unreachable.
 	var existing models.InterviewSchedule
@@ -91,12 +140,14 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 6: แปลงวัน "YYYY-MM-DD" + เวลา "HH:MM" เป็นรูปแบบกลาง (ผิด format → 400)
 	date, canonicalTime, err := parseAppointmentDateTime(payload.AppointmentDate, payload.AppointmentTime)
 	if err != nil {
 		utils.JSONError(c, http.StatusBadRequest, "invalid request payload", err.Error())
 		return
 	}
 
+	// ขั้น 7: สร้างแถว interview_schedules — status ไม่ต้องใส่ ได้ default "pending" จาก struct tag  (= Sequence ข้อ 8–10)
 	applicationID := application.ApplicationID
 	interview := &models.InterviewSchedule{
 		ApplicationID:      &applicationID,
@@ -113,12 +164,19 @@ func (h *InterviewController) CreateInterview(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 8: แจ้งนักศึกษา (U4) → แถวใหม่ในตาราง notifications  (= Sequence ข้อ 11–12)
 	notifyUser(h.db, student.UserID, "นัดหมายสัมภาษณ์ใหม่", "interview_scheduled",
 		fmt.Sprintf("%s นัดสัมภาษณ์คุณวันที่ %s เวลา %s น.", employer.CompanyName, payload.AppointmentDate, payload.AppointmentTime))
 
+	// ขั้น 9: ตอบ 201 + ข้อมูลนัดในรูป DTO  (= Sequence ข้อ 13)
 	utils.JSONSuccess(c, http.StatusCreated, h.mapToResponse(interview, employer.CompanyName, h.studentName(student.UserID)))
 }
 
+// ┌─ [U8] GET /api/v1/interviews ─ ดูนัดของตัวเอง ────────────────────────────────────┐
+// │ endpoint เดียว ใช้ได้ทั้ง 2 role — อ่าน role จาก JWT แล้วกรองคนละเงื่อนไข            │
+// │ Preload("Reschedules.ProposedSlots") = GORM โหลด has-many 2 ชั้นมาพร้อมกัน        │
+// │ (ประวัติเลื่อนนัด + เวลาที่เสนอ) ไม่ต้อง query ทีละแถว (กัน N+1)                    │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // ListMine returns interviews scoped to the current user's role (employer sees ones
 // they created, student sees ones scheduled for them).
 func (h *InterviewController) ListMine(c *gin.Context) {
@@ -128,6 +186,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		return
 	}
 
+	// role อ่านจาก JWT ที่ backend ออกให้เอง — client ปลอมไม่ได้
 	role, _ := utils.GetUserRoleFromContext(c)
 	var interviews []models.InterviewSchedule
 
@@ -136,6 +195,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		if !ok {
 			return
 		}
+		// ผู้ประกอบการ: เห็นเฉพาะนัดที่ตัวเองสร้าง (WHERE employer_id = ตัวเอง)
 		if err := h.db.Preload("Reschedules.ProposedSlots").Where("employer_id = ?", employer.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
 			utils.JSONInternalError(c, "failed to load interviews", err)
 			return
@@ -153,6 +213,7 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "submit your profile first")
 		return
 	}
+	// นักศึกษา: เห็นเฉพาะนัดของตัวเอง (WHERE student_id = ตัวเอง) ← นี่คือทางแยก "Access allowed?" ของ U8 ในโค้ด
 	if err := h.db.Preload("Reschedules.ProposedSlots").Where("student_id = ?", student.UserID).Order("created_at DESC").Find(&interviews).Error; err != nil {
 		utils.JSONInternalError(c, "failed to load interviews", err)
 		return
@@ -164,6 +225,33 @@ func (h *InterviewController) ListMine(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
 
+// ┌─ [U8] GET /api/v1/admin/interviews ─ เจ้าหน้าที่มหาวิทยาลัยดูนัดสัมภาษณ์ทั้งระบบ ─────────┐
+// │ Use Case U8 มี actor "University Staff" ด้วย — endpoint นี้คือทางเข้าของ actor นั้น       │
+// │ อ่านอย่างเดียว (ไม่มี POST/PUT ฝั่งแอดมิน) และเห็นทุกคน ไม่กรองด้วย employer/student  │
+// │ สิทธิ์: jwtAuth + RequireRole("admin") ที่ route group /admin                            │
+// └────────────────────────────────────────────────────────────────────────────────────┘
+// ListAll returns every interview in the system with its reschedule history — the
+// read-only view the university staff use to audit or mediate. Unlike ListMine it
+// is not scoped to the caller, which is why it lives behind the admin role.
+func (h *InterviewController) ListAll(c *gin.Context) {
+	var interviews []models.InterviewSchedule
+	if err := h.db.Preload("Reschedules.ProposedSlots").Order("created_at DESC").Find(&interviews).Error; err != nil {
+		utils.JSONInternalError(c, "failed to load interviews", err)
+		return
+	}
+	responses := make([]dto.InterviewResponse, 0, len(interviews))
+	for i := range interviews {
+		iv := &interviews[i]
+		responses = append(responses, h.mapToResponse(iv, h.companyName(iv.EmployerID), h.studentName(iv.StudentID)))
+	}
+	utils.JSONSuccess(c, http.StatusOK, responses)
+}
+
+// ┌─ [U1] PUT /api/v1/employer/interviews/:id ─ แก้รายละเอียดนัด ───────────────────────┐
+// │ ownedByEmployer = ต้องเป็นนัดของตัวเอง (กัน IDOR)                                   │
+// │ กฎ: ประกาศผลแล้ว / ยกเลิกแล้ว → แก้ไม่ได้  ← เช็คที่ backend ไม่ใช่แค่ล็อกปุ่มใน UI │
+// │ (เคยพิสูจน์ด้วย curl ว่า UI ล็อกอย่างเดียวข้ามได้ จึงเพิ่ม guard นี้)                 │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // UpdateInterview lets the employer edit an interview's appointment details.
 func (h *InterviewController) UpdateInterview(c *gin.Context) {
 	employer, ok := h.currentEmployer(c)
@@ -201,6 +289,7 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 		return
 	}
 
+	// เขียนผ่าน setAppointment ตัวเดียวทั้งระบบ → appointment_date/time มีรูปแบบเดียวไม่ว่าใครแก้
 	if err := setAppointment(h.db, interview.InterviewID, date, canonicalTime, map[string]any{
 		"interview_format":    payload.InterviewFormat,
 		"location":            payload.Location,
@@ -222,6 +311,7 @@ func (h *InterviewController) UpdateInterview(c *gin.Context) {
 // digits with no zone conversion, so a value carrying a real offset —
 // 13:30+07:00 — would be saved as 06:30 and read back as the wrong time by
 // everyone. Rejecting it here keeps that convention enforced, not assumed.
+// รับเฉพาะ RFC3339 ที่เป็น UTC (ลงท้าย Z) — ถ้ามาเป็น +07:00 ปฏิเสธ ไม่งั้นเวลาจะเพี้ยน 7 ชม. ตอนแสดง
 func utcInstant(raw string) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
@@ -275,6 +365,8 @@ func (h *InterviewController) openReschedulePending(interviewID uint) (bool, err
 // partial unique index on (interview_schedule_id) WHERE status='pending' (#6)
 // rejects the insert; that is mapped back to the same message the check gives
 // in the common case.
+// แกนกลางของทั้ง 2 flow เลื่อนนัด: INSERT คำขอ (+ slots ถ้าเป็นฝั่งผู้ประกอบการ) + เปลี่ยนนัดเป็น "rescheduling" ใน Transaction เดียว
+// ถ้า 2 คำขอยิงมาพร้อมกันจริงๆ unique index บน (interview_schedule_id) WHERE status='pending' กันให้ที่ระดับ DB
 func (h *InterviewController) createReschedule(c *gin.Context, interview *models.InterviewSchedule, reschedule *models.RescheduleInterview, extra func(tx *gorm.DB) error) bool {
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(reschedule).Error; err != nil {
@@ -298,6 +390,12 @@ func (h *InterviewController) createReschedule(c *gin.Context, interview *models
 	return true
 }
 
+// ┌─ [U3 ทางที่ 1] POST /api/v1/student/interviews/:id/reschedule ─ นศ. ขอเลื่อนนัด ──┐
+// │ นศ. เสนอ 1 เวลา → ผู้ประกอบการต้อง อนุมัติ/ปฏิเสธ ที่ RespondToReschedule           │
+// │ Activity Diagram: ทางแยก "Available on schedule?" → Not available → มาที่นี่        │
+// │ กฎ 3 ข้อ: นัดจบแล้วเลื่อนไม่ได้ / เปิดคำขอค้างได้ครั้งละ 1 / เวลาต้อง UTC RFC3339   │
+// │ เขียนตาราง reschedule_interviews (requested_by="student", status="pending")       │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // RequestReschedule is the student asking to move an interview to a single
 // time; the employer then approves or rejects it via
 // ApproveReschedule/RejectReschedule. Split from the employer's
@@ -332,12 +430,14 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 4: เวลาที่ นศ. เสนอ ต้องเป็น UTC RFC3339
 	t, valid := utcInstant(payload.StudentAvailableDateTime)
 	if !valid {
 		utils.JSONError(c, http.StatusBadRequest, "request failed", "student_available_date_time must be RFC3339 in UTC, e.g. 2026-09-20T13:30:00Z")
 		return
 	}
 
+	// ขั้น 5: สร้างคำขอ requested_by=student status=pending — ยังไม่แตะเวลานัดจริง จนผู้ประกอบการอนุมัติ
 	reschedule := &models.RescheduleInterview{
 		InterviewScheduleID:      interview.InterviewID,
 		RescheduleReason:         payload.Reason,
@@ -349,6 +449,7 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 6: แจ้งผู้ประกอบการ (U4) พร้อม FK reschedule_id → กล่องแจ้งเตือนจึงโชว์ปุ่ม อนุมัติ/ปฏิเสธ ได้ตรงนั้น
 	var employer models.Employer
 	h.db.First(&employer, interview.EmployerID)
 	notifyAboutReschedule(h.db, employer.UserID, "นักศึกษาขอเลื่อนนัดสัมภาษณ์", "interview_reschedule_request",
@@ -359,6 +460,13 @@ func (h *InterviewController) RequestReschedule(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusCreated, mapRescheduleToResponse(reschedule))
 }
 
+// ┌─ [U3 ทางที่ 2] POST /api/v1/employer/interviews/:id/reschedule-offer ─────────────┐
+// │ ผู้ประกอบการเสนอ ≤5 เวลา → นศ. เลือก 1 ที่ SelectRescheduleSlot (ไม่ต้องอนุมัติซ้ำ)  │
+// │ ทางนี้เพิ่มจากการทดสอบจริง — ผู้ประกอบการก็ติดธุระได้ ไม่ใช่แค่ นศ.                  │
+// │ เวลาแต่ละตัว = 1 แถวใน reschedule_proposed_slots                                    │
+// │   (Class Diagram: RescheduleInterview 1 ── 0..* RescheduleProposedSlot)            │
+// │ Transaction: สร้าง reschedule + slots ทุกแถว สำเร็จพร้อมกันหรือไม่สำเร็จเลย          │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // OfferRescheduleSlots is the employer offering the student several times to
 // choose from instead of asking the student for one. The student then picks
 // one via SelectRescheduleSlot — there is no further approval step, since the
@@ -398,6 +506,7 @@ func (h *InterviewController) OfferRescheduleSlots(c *gin.Context) {
 
 	// Store the offered times normalised so the student's later pick can be
 	// matched exactly against the list.
+	// ขั้น 4: แปลงทุกเวลาที่เสนอเป็น UTC — ผิดตัวเดียว 400 ทั้งคำขอ
 	slots := make([]time.Time, 0, len(payload.ProposedSlots))
 	for _, raw := range payload.ProposedSlots {
 		t, valid := utcInstant(raw)
@@ -408,6 +517,7 @@ func (h *InterviewController) OfferRescheduleSlots(c *gin.Context) {
 		slots = append(slots, t)
 	}
 
+	// ขั้น 5: คำขอ requested_by=employer — เวลาที่เสนอไปอยู่ตารางลูก reschedule_proposed_slots ไม่ได้อยู่ในแถวนี้
 	reschedule := &models.RescheduleInterview{
 		InterviewScheduleID: interview.InterviewID,
 		RescheduleReason:    payload.Reason,
@@ -432,6 +542,7 @@ func (h *InterviewController) OfferRescheduleSlots(c *gin.Context) {
 	}
 	reschedule.ProposedSlots = slotRows
 
+	// ขั้น 6: แจ้งนักศึกษา (U4) → กล่องแจ้งเตือนโชว์ radio เลือกเวลา
 	notifyAboutReschedule(h.db, interview.StudentID, "ผู้ประกอบการขอเลื่อนนัดสัมภาษณ์", "interview_reschedule_offer",
 		fmt.Sprintf("%s เสนอวันสัมภาษณ์ใหม่ %d วันให้เลือก — กรุณาเลือกวันที่สะดวก%s",
 			employer.CompanyName, len(slots), reasonSuffix(payload.Reason)),
@@ -497,6 +608,14 @@ func (h *InterviewController) applySlotToInterview(tx *gorm.DB, interviewID uint
 	return setAppointment(tx, interviewID, day, utc.Format("15:04"), map[string]any{"status": "confirmed"})
 }
 
+// ┌─ [U3] POST /api/v1/employer/reschedules/:id/approve | /reject ────────────────────┐
+// │ ผู้ประกอบการตอบคำขอเลื่อนของ นศ.  (ApproveReschedule / RejectReschedule เรียกมาที่นี่) │
+// │ ตรวจ 4 ชั้นก่อนทำ: เป็นเจ้าของนัด → คำขอเป็นฝั่ง student → ยัง pending → payload ถูก │
+// │ Transaction: อัปเดต reschedule (status, responded_at) + ย้ายเวลานัดพร้อมกัน          │
+// │   อนุมัติ → applySlotToInterview ย้ายวัน/เวลา + status=confirmed                     │
+// │   ปฏิเสธ → เวลาเดิมคงอยู่ status กลับเป็น confirmed (ไม่ค้าง rescheduling)           │
+// │ จบด้วยแจ้งเตือน นศ. (U4) ทั้ง 2 กรณี                                                 │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // RespondToReschedule is the employer approving or rejecting the time a student
 // asked to move to. Approving moves the appointment; rejecting leaves the
 // original time standing. Either way the interview stops being "rescheduling".
@@ -516,15 +635,18 @@ func (h *InterviewController) RespondToReschedule(c *gin.Context, approve bool) 
 		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
 		return
 	}
+	// ตรวจ 2: นัดของคำขอนี้ต้องเป็นของผู้ประกอบการคนนี้ (ไม่ใช่ → 404 ทำเหมือนไม่มี ไม่บอกว่ามีอยู่)
 	var interview models.InterviewSchedule
 	if err := h.db.First(&interview, reschedule.InterviewScheduleID).Error; err != nil || interview.EmployerID != employer.UserID {
 		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
 		return
 	}
+	// ตรวจ 3: ต้องเป็นคำขอฝั่งนักศึกษา — คำขอที่ตัวเองเสนอ จะมาอนุมัติเองไม่ได้
 	if reschedule.RequestedBy != "student" {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "this request is for the student to answer, not you")
 		return
 	}
+	// ตรวจ 4: ยังไม่เคยตอบ (ตอบซ้ำไม่ได้)
 	if reschedule.Status != "pending" {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "this reschedule request has already been answered")
 		return
@@ -538,6 +660,7 @@ func (h *InterviewController) RespondToReschedule(c *gin.Context, approve bool) 
 		return
 	}
 
+	// ลงมือใน Transaction เดียว: (1) อัปเดตคำขอ status + responded_at (+ เวลาใหม่ถ้าอนุมัติ)  (2) ย้ายนัด หรือคืนสถานะนัด
 	now := time.Now().UTC()
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{"responded_at": &now}
@@ -563,6 +686,7 @@ func (h *InterviewController) RespondToReschedule(c *gin.Context, approve bool) 
 		return
 	}
 
+	// แจ้งนักศึกษาผลการตอบ (U4) — ข้อความต่างกันตามอนุมัติ/ปฏิเสธ
 	var student models.Student
 	h.db.First(&student, interview.StudentID)
 	if approve {
@@ -586,6 +710,12 @@ func (h *InterviewController) ApproveReschedule(c *gin.Context) { h.RespondToRes
 // RejectReschedule declines the student's proposed time.
 func (h *InterviewController) RejectReschedule(c *gin.Context) { h.RespondToReschedule(c, false) }
 
+// ┌─ [U3] POST /api/v1/student/reschedules/:id/select ─ นศ. เลือกเวลา ─────────────────┐
+// │ ตรวจ: เป็น นศ. ของนัดนี้ → คำขอเป็นฝั่ง employer → ยัง pending                        │
+// │ กฎสำคัญ: เลือกได้เฉพาะเวลาที่มีในตาราง reschedule_proposed_slots จริง                │
+// │   (Count == 0 → 400) กัน นศ. ส่งเวลาที่ผู้ประกอบการไม่ได้เสนอ                          │
+// │ Transaction: reschedule → accepted + new_appointment_date_time, นัด → เวลาใหม่        │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // SelectRescheduleSlot is the student choosing one of the times the employer
 // offered. There is no further approval step — the employer already committed to
 // every slot they listed, so picking one settles the appointment immediately.
@@ -606,11 +736,13 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
 		return
 	}
+	// ตรวจ 2: นัดของคำขอนี้ต้องเป็นของนักศึกษาที่ล็อกอิน (ไม่ใช่ → 404)
 	var interview models.InterviewSchedule
 	if err := h.db.First(&interview, reschedule.InterviewScheduleID).Error; err != nil || interview.StudentID != userID {
 		utils.JSONError(c, http.StatusNotFound, "reschedule request not found", "no reschedule request exists with the given id")
 		return
 	}
+	// ตรวจ 3: ต้องเป็นคำขอฝั่งผู้ประกอบการ (ถึงจะมีเวลาให้เลือก)
 	if reschedule.RequestedBy != "employer" {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "this request is for the employer to answer, not you")
 		return
@@ -629,6 +761,7 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "validation error", err.Error())
 		return
 	}
+	// ขั้น 4: เวลาที่เลือกต้องเป็น UTC RFC3339
 	chosen, valid := utcInstant(payload.SelectedDateTime)
 	if !valid {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "selected_date_time must be RFC3339 in UTC")
@@ -637,6 +770,7 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 	// Only a time the employer actually offered may be chosen. timestamptz
 	// equality in Postgres compares by absolute instant, so this doesn't need
 	// the exact-string-match care the old comma-joined column did.
+	// ขั้น 5 (กฎสำคัญ): เวลาที่เลือกต้องมีอยู่ในตาราง reschedule_proposed_slots ของคำขอนี้จริง — เทียบ timestamptz ตรงๆ
 	var offeredCount int64
 	if err := h.db.Model(&models.RescheduleProposedSlot{}).
 		Where("reschedule_interview_id = ? AND slot_at = ?", reschedule.RescheduleID, chosen).
@@ -649,6 +783,7 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 6: Transaction — คำขอ → accepted + new_appointment_date_time, นัด → วัน/เวลาใหม่ status=confirmed
 	now := time.Now().UTC()
 	utc := chosen.UTC()
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
@@ -666,6 +801,7 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 		return
 	}
 
+	// ขั้น 7: แจ้งผู้ประกอบการว่านักศึกษาเลือกเวลาไหน (U4)
 	var employer models.Employer
 	h.db.First(&employer, interview.EmployerID)
 	notifyAboutReschedule(h.db, employer.UserID, "นักศึกษาเลือกวันสัมภาษณ์แล้ว", "interview_reschedule_result",
@@ -676,6 +812,8 @@ func (h *InterviewController) SelectRescheduleSlot(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, mapRescheduleToResponse(&reschedule))
 }
 
+// [U8] GET /api/v1/interviews/:id/reschedules — ประวัติเลื่อนนัดของนัดหนึ่ง
+// partyToInterview = ทั้ง นศ. และผู้ประกอบการของนัดนี้ดูได้ คนนอกได้ 404
 // ListReschedules returns the reschedule history for one interview.
 func (h *InterviewController) ListReschedules(c *gin.Context) {
 	interview, ok := h.partyToInterview(c)
@@ -694,6 +832,14 @@ func (h *InterviewController) ListReschedules(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, responses)
 }
 
+// ┌─ [U5] POST /api/v1/employer/interviews/:id/result ─ ประกาศผลสัมภาษณ์ ──────────────┐
+// │ Activity Diagram: "Record screening result (U5)" → "Send result to applicant (U4)" │
+// │ เก็บ result / result_comment / result_announced_at ลงตาราง + status=completed      │
+// │ กฎ: ประกาศได้ครั้งเดียว (Result != "" → 400)                                        │
+// │ *** ค่า result="passed" คือ "ประตู" เข้าสู่ระบบย่อยที่ 2 ***                          │
+// │     EmploymentController.CreateAgreement เช็ค Result == "passed" ก่อนสร้างข้อตกลง     │
+// │     (Use Case: U6 «extend» U5)                                                      │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // SendResult notifies the student of their interview outcome and persists it on
 // the InterviewSchedule (Result / ResultComment / ResultAnnouncedAt, status
 // "completed"). The stored "passed" is what gates drafting an employment
@@ -720,6 +866,7 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 
 	// The result drives what the student is told and whether an employment
 	// agreement may be drafted, so it is announced once and not overwritten.
+	// กฎ: ประกาศแล้วประกาศซ้ำไม่ได้ — เพราะค่า passed ถูกใช้เป็นเงื่อนไขของระบบจ้างงานต่อ (เปลี่ยนทีหลังจะพัง flow)
 	if interview.Result != "" {
 		utils.JSONError(c, http.StatusBadRequest, "action failed", "the result for this interview has already been announced")
 		return
@@ -727,6 +874,7 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 
 	// Persist the outcome so the student can re-open the result page later and
 	// the employer can see which candidates have already been told.
+	// บันทึกผลลง DB จริง (ไม่ใช่แค่ส่งแจ้งเตือน) → นศ. เปิดดูผลย้อนหลังได้ / ผู้ประกอบการรู้ว่าประกาศใครไปแล้ว
 	now := time.Now()
 	if err := h.db.Model(interview).Updates(map[string]any{
 		"result":              payload.Result,
@@ -741,6 +889,7 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 	var student models.Student
 	h.db.First(&student, interview.StudentID)
 
+	// ประกอบข้อความแจ้งเตือน (U4): ผ่าน/ไม่ผ่าน + ความเห็นถ้ามี
 	message := fmt.Sprintf("ผลการสัมภาษณ์ตำแหน่งที่ %s: ", employer.CompanyName)
 	if payload.Result == "passed" {
 		message += "ผ่านการสัมภาษณ์ กรุณารอข้อตกลงการจ้างงาน"
@@ -755,6 +904,11 @@ func (h *InterviewController) SendResult(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, gin.H{"sent": true, "result": payload.Result})
 }
 
+// ┌─ [U2] POST /api/v1/student/interviews/:id/confirm ─ นศ. ยืนยันเข้าสัมภาษณ์ ────────┐
+// │ Activity Diagram: "Available on schedule?" → Available → ที่นี่ / Not → U3          │
+// │ status → confirmed + confirmed_at  แล้วแจ้งผู้ประกอบการ (U4)                          │
+// │ กฎ: นัดที่ completed / cancelled ยืนยันไม่ได้ (กัน status ถอยหลัง)                    │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // ConfirmAttendance lets the student confirm they'll attend a scheduled interview.
 // The confirmation is persisted on the schedule so the UI can show the
 // "รอการยืนยัน" / "ยืนยันแล้ว" badge, and a notification goes to the employer.
@@ -775,6 +929,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		utils.JSONError(c, http.StatusBadRequest, "invalid interview id", "id must be a number")
 		return
 	}
+	// ตรวจความเป็นเจ้าของในตัว query เลย: นัด :id ต้องมี student_id = ฉัน (ไม่ใช่ → 404)
 	var interview models.InterviewSchedule
 	if err := h.db.Where("interview_id = ? AND student_id = ?", id, student.UserID).First(&interview).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "interview not found", "no interview exists with the given id")
@@ -793,6 +948,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		return
 	}
 
+	// บันทึก status=confirmed + เวลาที่ยืนยัน
 	confirmedAt := time.Now()
 	if err := h.db.Model(&interview).Updates(map[string]any{
 		"status":       "confirmed",
@@ -802,6 +958,7 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 		return
 	}
 
+	// แจ้งผู้ประกอบการว่านักศึกษายืนยันแล้ว (U4)
 	appointmentDate := ""
 	if interview.AppointmentDate != nil {
 		appointmentDate = interview.AppointmentDate.Format("2006-01-02")
@@ -816,6 +973,13 @@ func (h *InterviewController) ConfirmAttendance(c *gin.Context) {
 	utils.JSONSuccess(c, http.StatusOK, gin.H{"confirmed": true})
 }
 
+// ── helper ตรวจสิทธิ์ (ใช้ซ้ำทุก handler) ──────────────────────────────────────────────
+//
+//	currentEmployer  : user จาก JWT ต้องมีโปรไฟล์ Employer
+//	ownedByEmployer  : นัด :id ต้องเป็นของ employer คนนี้ — ไม่ใช่ → 404 (กัน IDOR)
+//	partyToInterview : ผู้เรียกต้องเป็น "คู่นัด" (student หรือ employer ของนัดนั้น)
+//
+// หลัก: ทุก endpoint ตรวจความเป็นเจ้าของที่ backend เสมอ UI มีไว้เพื่อ UX เท่านั้น
 func (h *InterviewController) currentEmployer(c *gin.Context) (*models.Employer, bool) {
 	userID, ok := utils.GetUserIDFromContext(c)
 	if !ok {
@@ -898,6 +1062,8 @@ func (h *InterviewController) companyName(employerID uint) string {
 	return employer.CompanyName
 }
 
+// ── DTO mapping ── แปลง model → response  (ไม่ส่ง struct model ตรงออก API)
+// วันเป็น "YYYY-MM-DD", เวลา "HH:MM", timestamp เป็น RFC3339 — หน้า React จึง format ง่าย
 func (h *InterviewController) mapToResponse(iv *models.InterviewSchedule, companyName, studentName string) dto.InterviewResponse {
 	appointmentDate := ""
 	if iv.AppointmentDate != nil {
@@ -961,6 +1127,13 @@ func mapRescheduleToResponse(r *models.RescheduleInterview) dto.RescheduleRespon
 	}
 }
 
+// ═══ [U4] Send Appointment and Status Notifications ═══════════════════════════════════
+// lifeline ":NotificationService" ใน Sequence Diagram = ฟังก์ชันกลุ่มนี้
+// (Go ไม่บังคับ OOP จึงเป็นฟังก์ชัน ไม่ใช่ class แยก)
+// เขียนตาราง notifications พร้อม FK → interview_schedule_id / reschedule_interview_id
+// FK นี้ทำให้หน้าแจ้งเตือน (RescheduleAction ใน pages/notifications) รู้ว่าแจ้งเตือนนี้
+// เกี่ยวกับคำขอไหน → แสดงปุ่ม อนุมัติ/ปฏิเสธ หรือ radio เลือกเวลา ได้ในแจ้งเตือนเลย
+// ═════════════════════════════════════════════════════════════════════════════════════
 // notifyAboutInterview is notifyUser plus a link back to the interview that
 // triggered it, so the notification list can deep-link into the appointment.
 // notifyAboutReschedule links the notification to both the interview and the

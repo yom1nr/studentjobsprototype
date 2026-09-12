@@ -26,6 +26,13 @@ function formatSlot(rfc3339: string): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} เวลา ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} น.`
 }
 
+// ┌─ [B6733827 · U3 + U4] RescheduleAction : ตอบคำขอเลื่อนนัดได้ "ในกล่องแจ้งเตือน" เลย ──┐
+// │ ใช้ FK ที่ backend แนบมากับแจ้งเตือน (interview_schedule_id, reschedule_interview_id) │
+// │ → โหลดคำขอนั้นมาดูว่ายัง pending ไหม                                                │
+// │   role employer + คำขอจาก student  → ปุ่ม อนุมัติ / ปฏิเสธ                             │
+// │   role student  + คำขอจาก employer → radio เลือก 1 เวลาจาก proposed_slots            │
+// │ ตอบแล้ว → เรนเดอร์ว่าง แจ้งเตือนกลายเป็นประวัติ                                       │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 /**
  * The decision a reschedule notification is asking for, answerable in place.
  * Sending people to another page to find the right candidate defeats the point
@@ -65,6 +72,7 @@ function RescheduleAction({
     return () => { cancelled = true }
   }, [token, interviewId, rescheduleId])
 
+  // แสดงเฉพาะคำขอที่ยังรอตอบ — ตอบแล้ว (ที่นี่หรือหน้าอื่น) จะไม่โชว์ปุ่มซ้ำ
   if (!entry || entry.status !== 'pending') return null
 
   async function run(fn: () => Promise<unknown>, fallback: string) {
@@ -81,6 +89,7 @@ function RescheduleAction({
   }
 
   // Employer side: the student named one time; accept it or leave the original.
+  // ฝั่งผู้ประกอบการ เห็นคำขอของ นศ. → ปุ่ม อนุมัติ / ปฏิเสธ → approveReschedule / rejectReschedule
   if (entry.requested_by === 'student' && role === 'employer') {
     return (
       <Box sx={{ mt: 1.5, p: 2, borderRadius: 2, bgcolor: '#FFF7ED', border: '1px solid #FDBA74' }}>
@@ -115,6 +124,7 @@ function RescheduleAction({
 
   // Student side: the employer already committed to every slot listed, so
   // picking one settles the appointment with no further approval.
+  // ฝั่งนักศึกษา เห็นเวลาที่ผู้ประกอบการเสนอ → radio เลือก 1 → selectRescheduleSlot
   if (entry.requested_by === 'employer' && role === 'student') {
     return (
       <Box sx={{ mt: 1.5, p: 2, borderRadius: 2, bgcolor: '#FFF7ED', border: '1px solid #FDBA74' }}>

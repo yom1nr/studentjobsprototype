@@ -14,6 +14,7 @@ import {
 
 // Icons
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
+import WorkHistoryOutlinedIcon from '@mui/icons-material/WorkHistoryOutlined'
 import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined'
 import WorkOutlineIcon from '@mui/icons-material/WorkOutlineOutlined'
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined'
@@ -125,6 +126,13 @@ const adminStudentDirectoryNavItem: NavItem = {
   path: '/admin/student-directory',
 }
 
+// B6733827 U8 (University Staff): read-only history of every interview and agreement
+const adminHistoryNavItem: NavItem = {
+  label: 'ประวัติสัมภาษณ์ / ข้อตกลง',
+  icon: <WorkHistoryOutlinedIcon />,
+  path: '/admin/history',
+}
+
 function buildBottomNavItems(unreadNotifications: number): NavItem[] {
   return [
     {
@@ -213,6 +221,7 @@ function AppShellInner() {
       adminNavItem, // อนุมัติผู้ประกอบการ
       adminEmployerDirectoryNavItem, // รายชื่อผู้ประกอบการ
       adminStudentDirectoryNavItem, // รายชื่อนักศึกษา
+      adminHistoryNavItem, // ประวัติสัมภาษณ์ / ข้อตกลง (U8)
       mainNavItems[3], // แจ้งปัญหา / ร้องเรียน
     ],
   }

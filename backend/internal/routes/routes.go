@@ -96,6 +96,25 @@ func SetupRouter(
 	employer.POST("/applications/:id/review", approvedEmployer, applicationHandler.ReviewApplication)
 	employer.DELETE("/applications/:id", approvedEmployer, applicationHandler.DeleteApplication)
 
+	// ═══ [B6733827] เส้นทาง API ของระบบนัดหมายสัมภาษณ์ + ตกลงการจ้างงาน ═════════════════
+	// middleware ที่ครอบ (เรียงตามลำดับที่ request ผ่าน):
+	//   jwtAuth          → ต้องมี token ถูกต้อง            (401 ถ้าไม่มี)
+	//   RequireRole      → group /employer ต้อง role=employer, /student ต้อง role=student (403)
+	//   approvedEmployer → ผู้ประกอบการต้องผ่านการอนุมัติจากแอดมินก่อน (ของทีม ใช้ร่วมกัน)
+	// แล้ว handler แต่ละตัวยังตรวจ "ความเป็นเจ้าของ" ของ :id ซ้ำอีกชั้น (กัน IDOR)
+	//
+	//   U1  สร้าง/แก้นัด        employer  POST/PUT  /interviews
+	//   U5  ประกาศผล            employer  POST      /interviews/:id/result
+	//   U3  เลื่อนนัด            student   POST      /interviews/:id/reschedule       (นศ. เสนอ 1 เวลา)
+	//                            employer  POST      /interviews/:id/reschedule-offer (เสนอ ≤5 เวลา)
+	//                            employer  POST      /reschedules/:id/approve|reject
+	//                            student   POST      /reschedules/:id/select
+	//   U2  ยืนยันเข้าสัมภาษณ์   student   POST      /interviews/:id/confirm
+	//   U6  จัดทำข้อตกลง         employer  POST      /agreements   (+ DELETE soft-delete)
+	//   U7  ตอบข้อตกลง           student   POST      /agreements/:id/accept|reject
+	//   U8  ดูประวัติ            ทั้งคู่    GET       /interviews, /interviews/:id/reschedules, /agreements
+	//                            admin     GET       /admin/interviews, /admin/agreements  (University Staff อ่านทั้งระบบ)
+	// ═══════════════════════════════════════════════════════════════════════════════════
 	// Employer: interview scheduling (B6733827 subsystem 1)
 	employer.POST("/interviews", approvedEmployer, interviewHandler.CreateInterview)
 	employer.PUT("/interviews/:id", approvedEmployer, interviewHandler.UpdateInterview)
@@ -187,6 +206,11 @@ func SetupRouter(
 	admin.GET("/audit-logs", adminHandler.ListAuditLogs)
 	admin.GET("/complaints", complaintHandler.ListAll)
 	admin.POST("/complaints/:id/history", complaintHandler.AddHistory)
+
+	// Admin (University Staff): read-only history of every interview and agreement
+	// (B6733827 U8 — the third actor on "View History / Past Agreements")
+	admin.GET("/interviews", interviewHandler.ListAll)
+	admin.GET("/agreements", employmentHandler.ListAll)
 
 	// Admin: final pass/fail verification on employer-accepted applications
 	admin.GET("/applications", applicationHandler.ListAdminApplications)

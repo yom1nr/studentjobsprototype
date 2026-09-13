@@ -19,6 +19,15 @@ import type { AgreementRecord, InterviewScheduleRecord } from '../../interface/I
 
 const colors = { navy: '#012150', border: '#DDE1E6' }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [B6733827] หน้าจอระบบย่อยที่ 2 : ตกลงการจ้างงาน  (lifeline ":AgreementUI" ใน Sequence 2)
+//
+//   EmployerEmploymentView → U6 จัดทำข้อตกลง (tab create) / สถานะ (status) / ประวัติ+ลบ (history, U8)
+//   StudentEmploymentView  → U7 อ่านเงื่อนไข → ตกลง / ปฏิเสธพร้อมเหตุผล
+//
+// การไหลของข้อมูล: services/https/agreements.ts ──► backend EmploymentController ──► employment_agreements
+// จุดเชื่อมกับระบบย่อยที่ 1: dropdown "เลือกผู้สมัคร" ใช้ interview ที่ result === 'passed' เท่านั้น
+// ═══════════════════════════════════════════════════════════════════════════════
 function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? (err.detail ? `${err.message}: ${err.detail}` : err.message) : fallback
 }
@@ -31,8 +40,16 @@ const statusChipMap: Record<AgreementRecord['status'], { label: string; color: s
   pending: { label: 'รอการตอบรับ', color: '#B5850C', bg: '#FFF0DD' },
   accepted: { label: 'มีผลบังคับ', color: '#217829', bg: '#EAF7EA' },
   rejected: { label: 'ปฏิเสธแล้ว', color: '#DA1E28', bg: '#FDEAEA' },
+  // void ไม่เคยถูกส่งมาที่หน้านี้ (ListMine ซ่อนไว้) — ใส่ไว้ให้ type ครบ เผื่อกรณีข้อมูลเก่า
+  void: { label: 'ยกเลิกแล้ว', color: '#697077', bg: '#F0F0F0' },
 }
 
+// ┌─ มุมมองนักศึกษา (U7) ─────────────────────────────────────────────────────────────┐
+// │ Activity Diagram 2: "Read / review the agreement (U7)" → ◇ Accept the agreement?  │
+// │   Accept → accept()          → สถานะ "มีผลบังคับ" → หน้า "งานของฉัน" แสดงงานนี้    │
+// │   Reject → confirmReject()   → ต้องระบุเหตุผลก่อน (Sequence 18.1 error ถ้าว่าง)     │
+// │ แสดงเงื่อนไขครบทุกช่องเสมอ ทั้งก่อนและหลังตัดสิน (โปร่งใส) + เหตุผลปฏิเสธถ้ามี         │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 // ─────────────────────────── Student side ───────────────────────────
 function StudentEmploymentView() {
   usePageTitle('ข้อตกลงการจ้างงาน')
@@ -43,6 +60,7 @@ function StudentEmploymentView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // ── state ตอบข้อตกลง (U7): กำลังกรอกเหตุผลปฏิเสธ?, เหตุผล, dialog สำเร็จ (ตกลง/ปฏิเสธ), กำลังส่ง?
   const [rejecting, setRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [acceptedDialog, setAcceptedDialog] = useState(false)
@@ -67,8 +85,10 @@ function StudentEmploymentView() {
     return () => { cancelled = true }
   }, [token])
 
+  // backend กรองมาแล้วว่าเป็นของฉัน และ นศ. มีข้อตกลงกับผู้ประกอบการรายเดียวได้ทีละ 1 → แสดงตัวล่าสุด
   const agreement = agreements[0] ?? null
 
+  // [U7] Sequence 2 ข้อ 7–8: click accept → acceptAgreement(agreementID) → POST /student/agreements/:id/accept
   async function accept() {
     if (!token || !agreement) return
     setSubmitting(true)
@@ -83,6 +103,7 @@ function StudentEmploymentView() {
     }
   }
 
+  // [U7] Sequence 2 ข้อ 18: rejectAgreement(agreementID, reason) → POST /student/agreements/:id/reject
   async function confirmReject() {
     if (!token || !agreement) return
     setSubmitting(true)
@@ -102,6 +123,7 @@ function StudentEmploymentView() {
     return <Box sx={{ maxWidth: 1000, mx: 'auto' }}><ErrorAlert message={error} /><Typography sx={{ color: '#697077' }}>กำลังโหลด...</Typography></Box>
   }
 
+  // ── หน้าว่าง: ยังไม่มีข้อตกลงของฉัน (ของคนอื่นไม่ถูกส่งมาตั้งแต่ backend)
   if (!agreement) {
     return (
       <Box sx={{ maxWidth: 700, mx: 'auto', textAlign: 'center', py: 8 }}>
@@ -114,6 +136,7 @@ function StudentEmploymentView() {
 
   const statusChip = statusChipMap[agreement.status]
 
+  // ── หน้าข้อตกลง (U7): ซ้าย = เงื่อนไขครบ 6 ช่อง / ขวา = ปุ่มตอบ ซึ่งเปลี่ยนตาม status ด้านล่าง
   return (
     <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
       <ErrorAlert message={error} />
@@ -169,6 +192,7 @@ function StudentEmploymentView() {
               <Typography sx={{ fontSize: 12, color: '#8A6A1B' }}>ตรวจสอบรายละเอียดให้ครบก่อนตัดสินใจ การตอบรับ/ปฏิเสธไม่สามารถย้อนกลับได้</Typography>
             </Box>
 
+            {/* pending: ปุ่ม "ตอบรับ" (accept) + "ปฏิเสธ" (เปิดช่องกรอกเหตุผล) */}
             {agreement.status === 'pending' && !rejecting && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                 <Button
@@ -190,6 +214,7 @@ function StudentEmploymentView() {
               </Box>
             )}
 
+            {/* pending + กำลังปฏิเสธ: ช่องเหตุผล (บังคับ) + ปุ่มยืนยัน → confirmReject() / ยกเลิก */}
             {agreement.status === 'pending' && rejecting && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                 <TextField
@@ -213,6 +238,7 @@ function StudentEmploymentView() {
               </Box>
             )}
 
+            {/* accepted: ป้าย "มีผลบังคับ" + ปุ่มไปหน้างานของฉัน */}
             {agreement.status === 'accepted' && (
               <Box sx={{ bgcolor: '#EAF7EA', color: '#217829', fontSize: 13, borderRadius: 2, p: 1.5 }}>
                 คุณตอบรับข้อตกลงนี้แล้ว — มีผลบังคับตั้งแต่ {agreement.start_date}
@@ -220,6 +246,7 @@ function StudentEmploymentView() {
             )}
             {/* Show the student the reason they gave, so the record of their own
                 decision is visible to them too, not only to the employer. */}
+            {/* rejected: แสดงเหตุผลที่ปฏิเสธไว้ (โปร่งใส) */}
             {agreement.status === 'rejected' && (
               <Box sx={{ bgcolor: '#FDEAEA', borderRadius: 2, p: 1.5 }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#B3261E' }}>คุณปฏิเสธข้อตกลงนี้แล้ว</Typography>
@@ -277,11 +304,12 @@ function StudentEmploymentView() {
 }
 
 // ─────────────────────────── Employer side ───────────────────────────
-// Wired to the real backend (B6733827): candidates come from the employer's
-// accepted applications; create/list/status go through the new agreement
-// endpoints. Status IS a persisted field on EmploymentAgreement (added
-// pragmatically — see the model comment), so accept/reject reflect correctly
-// after a reload, unlike the interview-result flow.
+// ┌─ มุมมองผู้ประกอบการ ──────────────────────────────────────────────────────────────┐
+// │ tab create  → U6 เลือก "นัดสัมภาษณ์ที่ผ่าน" จาก dropdown + กรอกเงื่อนไข 6 ช่อง → send() │
+// │ tab status  → รายการที่รอ นศ. ตอบ / ตอบแล้ว                                          │
+// │ tab history → U8 ประวัติทั้งหมด + เหตุผลปฏิเสธ + ปุ่มลบรายการที่ถูกปฏิเสธ (soft delete)   │
+// │ status เก็บถาวรใน employment_agreements → reload แล้วยังถูก                           │
+// └────────────────────────────────────────────────────────────────────────────────────┘
 
 type AgreementTab = 'create' | 'status' | 'history'
 
@@ -289,6 +317,7 @@ function EmployerEmploymentView() {
   usePageTitle('ระบบตกลงการจ้างงาน')
   const { token } = useAuth()
 
+  // ── tab ที่เปิดอยู่: create (U6 จัดทำ) / status (รอตอบ-ตอบแล้ว) / history (U8 ประวัติ + ลบ)
   const [tab, setTab] = useState<AgreementTab>('create')
   const [applications, setApplications] = useState<Application[]>([])
   const [interviews, setInterviews] = useState<InterviewScheduleRecord[]>([])
@@ -302,6 +331,7 @@ function EmployerEmploymentView() {
   const [deleteTarget, setDeleteTarget] = useState<AgreementRecord | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // ── ฟอร์มข้อตกลง (U6): เลือก "นัดที่ผ่าน" 1 รายการ + เงื่อนไข 6 ช่อง (วันเริ่ม ระยะเวลา ค่าจ้าง ชั่วโมง สิทธิ์ลา เงื่อนไขเพิ่ม)
   // Keyed on the interview, not the student: a candidate who passed for two
   // positions needs a separate contract for each, and the interview is what
   // carries the position.
@@ -351,6 +381,9 @@ function EmployerEmploymentView() {
     return () => { cancelled = true }
   }, [token])
 
+  // ── กรอง dropdown ให้ตรงกฎ backend เป๊ะ (ฟอร์มจะไม่เสนอคนที่ API จะปฏิเสธ) ──────────
+  // กฎ 1: นศ. มีสัญญา active กับเราอยู่ → ไม่เสนอซ้ำ  (= activeAgreementFor ใน backend)
+  //        หมดอายุ = start_date + duration_months เดือน  เทียบกับ loadedAt (ไม่ใช่ Date.now() ใน render)
   // A student works under one contract with this employer at a time, so anyone
   // whose contract is still running is not offered again. A contract with no
   // computable end counts as running — mirroring the API's rule so the form never
@@ -376,10 +409,14 @@ function EmployerEmploymentView() {
   // back on this list.
   const offeredInterviewIds = new Set(agreements.map((a) => a.interview_schedule_id))
 
+  // กฎ 2: นัดที่มีข้อตกลงแล้ว (ไม่ว่าผลใด) → ไม่เสนอซ้ำ   (= 1 นัด 1 ข้อตกลง ใน backend)
+  // กฎ 3: ต้อง result === 'passed'                        (= ประตูจากระบบย่อยที่ 1, U6 «extend» U5)
+  // ผลลัพธ์ eligibleInterviews = passed ∧ ¬offered ∧ ¬contracted
   const passedInterviews = interviews.filter((i) => i.result === 'passed')
   const eligibleInterviews = passedInterviews.filter(
     (i) => !offeredInterviewIds.has(i.id) && !contractedStudentIds.has(i.student_id),
   )
+  // ตัวเลขอธิบายบนหน้าจอ: กี่คนถูกซ่อนเพราะปฏิเสธไปแล้ว / กี่คนติดสัญญาอยู่
   const declinedCount = passedInterviews.filter((i) => {
     const a = agreements.find((x) => x.interview_schedule_id === i.id)
     return a?.status === 'rejected'
@@ -393,6 +430,7 @@ function EmployerEmploymentView() {
 
   const selectedInterview = passedInterviews.find((i) => i.id === interviewId) ?? null
 
+  // ลบข้อตกลงที่ถูกปฏิเสธ → DELETE /employer/agreements/:id (backend เปลี่ยน status → void ไม่ลบแถวจริง)
   async function handleDelete() {
     if (!token || !deleteTarget) return
     setDeleting(true)
@@ -409,6 +447,7 @@ function EmployerEmploymentView() {
     }
   }
 
+  // [U6] Activity: "fill in the employment agreement form" → POST /employer/agreements (interview_id + เงื่อนไข 6 ช่อง)
   async function send() {
     if (!token || !interviewId) return
     setSubmitting(true)
@@ -438,7 +477,7 @@ function EmployerEmploymentView() {
   // This is the details tab, so every agreement is listed whatever the outcome —
   // a declined one still has to show the terms that were offered and the reason
   // it was turned down. Ordering puts the ones still needing an answer first.
-  const statusOrder: Record<AgreementRecord['status'], number> = { pending: 0, accepted: 1, rejected: 2 }
+  const statusOrder: Record<AgreementRecord['status'], number> = { pending: 0, accepted: 1, rejected: 2, void: 3 }
   const listedAgreements = [...agreements].sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
   const selectedAgreement =
     listedAgreements.find((a) => a.id === selectedAgreementId) ?? listedAgreements[0] ?? null
@@ -455,6 +494,7 @@ function EmployerEmploymentView() {
         <Button onClick={() => setTab('history')} sx={{ borderRadius: '20px', textTransform: 'none', px: 2.5, bgcolor: tab === 'history' ? colors.navy : '#F0F0F0', color: tab === 'history' ? '#fff' : colors.navy }}>ประวัติย้อนหลัง</Button>
       </Box>
 
+      {/* tab create (U6): dropdown = eligibleInterviews เท่านั้น → กรอกเงื่อนไข → send() → dialog สำเร็จ */}
       {tab === 'create' && (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr' }, gap: 3, alignItems: 'start' }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, p: 3 }}>
@@ -528,6 +568,7 @@ function EmployerEmploymentView() {
         </Box>
       )}
 
+      {/* tab status: รายการที่ส่งไปแล้ว แยก รอตอบ / ตกลง / ปฏิเสธ พร้อมเงื่อนไขและเหตุผล */}
       {tab === 'status' && (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1.4fr' }, gap: 3, alignItems: 'start' }}>
           <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
@@ -611,6 +652,7 @@ function EmployerEmploymentView() {
         </Box>
       )}
 
+      {/* tab history (U8): ทุกรายการย้อนหลัง — แถวที่ rejected มีปุ่มลบ (soft delete → เปิดให้เสนอตำแหน่งนั้นใหม่ได้) */}
       {tab === 'history' && (
         <Box sx={{ border: `1px solid ${colors.border}`, borderRadius: 3, overflow: 'hidden' }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr 1.6fr 1fr 1.2fr 60px', bgcolor: '#F7F9FC', px: 2.5, py: 1.5 }}>
@@ -638,6 +680,7 @@ function EmployerEmploymentView() {
         </Box>
       )}
 
+      {/* Dialog ยืนยันลบ → handleDelete() */}
       <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
         <Box sx={{ p: 3.5 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 18, color: colors.navy, mb: 1 }}>ลบข้อตกลงที่ถูกปฏิเสธ?</Typography>
@@ -665,6 +708,7 @@ function EmployerEmploymentView() {
         </Box>
       </Dialog>
 
+      {/* Dialog แจ้งว่าส่งข้อตกลงสำเร็จ (นศ. ได้รับแจ้งเตือน U4 แล้ว) */}
       <Dialog open={sendConfirmOpen} onClose={() => setSendConfirmOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: 4 } } }}>
         <Box sx={{ p: 4, textAlign: 'center', position: 'relative' }}>
           <IconButton size="small" onClick={() => setSendConfirmOpen(false)} sx={{ position: 'absolute', top: 12, right: 12 }}><CloseOutlinedIcon fontSize="small" /></IconButton>
@@ -687,6 +731,7 @@ function EmployerEmploymentView() {
   )
 }
 
+// จุดเข้า: อ่าน role จาก useAuth() → เรนเดอร์มุมมองผู้ประกอบการหรือนักศึกษา
 export default function EmploymentPage() {
   const { user } = useAuth()
   return user?.role === 'employer' ? <EmployerEmploymentView /> : <StudentEmploymentView />

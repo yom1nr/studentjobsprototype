@@ -28,6 +28,7 @@ import AdminEmployerApprovalsPage from '../pages/admin'
 import AdminApplicationVerificationPage from '../pages/admin/applications'
 import AdminEmployerDirectoryPage from '../pages/admin/employers'
 import AdminStudentDirectoryPage from '../pages/admin/students'
+import AdminHistoryPage from '../pages/admin/history'
 import NotFoundPage from '../pages/not-found'
 
 function HomeRedirect() {
@@ -96,6 +97,8 @@ export function MainRoutes() {
               <Route path="/admin/applications" element={<AdminApplicationVerificationPage />} />
               <Route path="/admin/employer-directory" element={<AdminEmployerDirectoryPage />} />
               <Route path="/admin/student-directory" element={<AdminStudentDirectoryPage />} />
+              {/* B6733827 U8 — University Staff read-only history of interviews + agreements */}
+              <Route path="/admin/history" element={<AdminHistoryPage />} />
             </Route>
           </Route>
         </Route>
